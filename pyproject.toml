@@ -7,7 +7,11 @@ authors = [
     { name = "Christian Andersen", email = "cdandersen98@gmail.com" }
 ]
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "openai>=3.22.1",
+    "pydantic-settings>=2.15.0",
+    "rich>=15.0.0",
+]
 
 [project.scripts]
 softmaxlint = "softmaxlint:main"

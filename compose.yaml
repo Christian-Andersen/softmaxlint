@@ -1,0 +1,18 @@
+services:
+  softmaxlint_vllm:
+    image: docker.io/vllm/vllm-openai:latest
+    container_name: softmaxlint_vllm
+    ipc: host
+    ports:
+      - "8000:8000"
+    command:
+      - "--model"
+      - "Qwen/Qwen3.5-0.8B"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8000"
+    devices:
+      - "nvidia.com/gpu=all"
+    volumes:
+      - ~/.cache/huggingface:/root/.cache/huggingface:z
