@@ -125,7 +125,6 @@ def main() -> int:
     if args.threshold_crit is not None:
         settings.threshold_crit = args.threshold_crit
 
-    console.print(f"[bold]model[/bold] {settings.model_name}")
     console.print(f"[bold]server[/bold] {settings.server_base_url}")
     console.print(f"[bold]slice mode[/bold] {settings.fim_slice_mode}")
     console.print(
@@ -135,6 +134,9 @@ def main() -> int:
     linter = SoftmaxLinter(config=settings)
 
     try:
+        # Resolve up front so an unreachable endpoint or an ambiguous model
+        # fails before any of the corpus is scored.
+        console.print(f"[bold]model[/bold] {linter.model_name}\n")
         correct_files = sorted(collect_python_files([CORRECT]))
         bug_files = sorted(collect_python_files([BUGS]))
         if args.limit:

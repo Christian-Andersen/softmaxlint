@@ -46,6 +46,9 @@ SURPRISED_LOGPROB = math.log(0.02)
 
 BASE_URL = "http://localhost:8000/v1"
 
+#: What the stub endpoint claims to serve.
+SERVED_MODEL = "stub-served-model"
+
 CORRECT_DIR = Path(__file__).resolve().parent.parent / "corpus" / "correct"
 BUG_DIR = Path(__file__).resolve().parent.parent / "corpus" / "bugs"
 
@@ -122,13 +125,30 @@ class StubServer:
         *,
         error: Exception | None = None,
         responder: Callable[[str | list[str]], dict[str, Any]] | None = None,
+        models: list[str] | None = None,
+        models_status: int = 200,
     ) -> None:
         self.body: dict[str, Any] = fim_body([]) if body is None else body
         self.error = error
         self.responder = responder
+        self.models: list[str] = [SERVED_MODEL] if models is None else models
+        self.models_status = models_status
         self.requests: list[dict[str, Any]] = []
+        self.model_lookups: int = 0
 
     def __call__(self, request: httpx2.Request) -> httpx2.Response:
+        if request.method == "GET":
+            self.model_lookups += 1
+            if self.models_status != 200:
+                return httpx2.Response(self.models_status, json={"error": "no such endpoint"})
+            return httpx2.Response(
+                200,
+                json={
+                    "object": "list",
+                    "data": [{"id": name, "object": "model", "created": 0, "owned_by": "stub"} for name in self.models],
+                },
+            )
+
         payload = json.loads(request.content)
         self.requests.append(payload)
         if self.error is not None:
@@ -345,10 +365,15 @@ def make_linter(settings: Settings, server: StubServer) -> Callable[..., Softmax
         *,
         error: Exception | None = None,
         responder: Callable[[str | list[str]], dict[str, Any]] | None = None,
+        models: list[str] | None = None,
+        models_status: int = 200,
         **overrides: Any,
     ) -> SoftmaxLinter:
         server.error = error
         server.responder = responder
+        if models is not None:
+            server.models = models
+        server.models_status = models_status
         linter = SoftmaxLinter(config=settings.model_copy(update=overrides))
         linter.client = server.client()
         return linter

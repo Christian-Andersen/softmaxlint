@@ -2,6 +2,7 @@
 
 from typing import Literal
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,7 +15,13 @@ class Settings(BaseSettings):
     """
 
     server_base_url: str = "http://localhost:8000/v1"
-    model_name: str = "Qwen/Qwen3.5-0.8B"
+
+    # Which model to score with. Left unset by default: the served model is
+    # discovered from the endpoint instead, so upgrading the server does not
+    # also mean editing this file. Set it explicitly only to pin a name -- for
+    # instance when the server advertises several aliases.
+    model_name: str | None = None
+
     api_key: str = "EMPTY"
     threshold_warn: float = 0.30
     threshold_crit: float = 0.10
@@ -59,3 +66,9 @@ class Settings(BaseSettings):
     fim_batch_size: int = 256
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    @field_validator("model_name", mode="before")
+    @classmethod
+    def _blank_model_name_means_discover(cls, value: object) -> object:
+        """Treat a blank ``MODEL_NAME=`` in a .env file as unset, not as ""."""
+        return None if isinstance(value, str) and not value.strip() else value

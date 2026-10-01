@@ -13,6 +13,7 @@ from tests.conftest import (
     BUGGY_SNIPPET,
     CONFIDENT_LOGPROB,
     DEFAULT_MARKERS,
+    SERVED_MODEL,
     StubServer,
     after_of,
     echo_then,
@@ -164,7 +165,82 @@ def test_the_request_asks_for_one_token_and_the_configured_candidate_count(
     assert request["max_tokens"] == 1
     assert request["temperature"] == 0
     assert request["logprobs"] == 7
-    assert request["model"] == Settings(_env_file=None).model_name
+    assert request["model"] == SERVED_MODEL
+
+
+# ------------------------------------------------------------------------------
+# Model discovery
+# ------------------------------------------------------------------------------
+def test_the_model_is_discovered_from_the_endpoint_by_default(
+    make_linter: MakeLinter,
+    server: StubServer,
+    settings: Settings,
+) -> None:
+    assert settings.model_name is None
+
+    assert make_linter().model_name == SERVED_MODEL
+    assert server.model_lookups == 1
+
+
+def test_an_explicit_model_name_wins_and_skips_discovery(make_linter: MakeLinter, server: StubServer) -> None:
+    linter = make_linter(responder=fim_responder(), model_name="pinned/model")
+
+    assert linter.model_name == "pinned/model"
+    assert server.requests == []
+
+
+def test_the_discovered_model_is_the_one_requested(make_linter: MakeLinter, server: StubServer) -> None:
+    linter = make_linter(responder=fim_responder(), models=["served/other"])
+
+    linter.evaluate_snippet("ab")
+
+    assert server.requests[-1]["model"] == "served/other"
+
+
+def test_discovery_happens_once_per_linter(make_linter: MakeLinter, server: StubServer) -> None:
+    linter = make_linter(responder=fim_responder())
+
+    for _ in range(3):
+        linter.evaluate_snippet("ab")
+
+    assert len(server.requests) == 6  # three calls, each a tokenization plus a scoring request
+    assert server.model_lookups == 1  # ...but the model was listed only once
+
+
+def test_an_ambiguous_endpoint_is_refused_rather_than_guessed(make_linter: MakeLinter) -> None:
+    linter = make_linter(models=["b-model", "a-model"])
+
+    with pytest.raises(SoftmaxLintError, match="advertises several models"):
+        _ = linter.model_name
+
+
+def test_an_endpoint_with_no_models_is_an_error(make_linter: MakeLinter) -> None:
+    linter = make_linter(models=[])
+
+    with pytest.raises(SoftmaxLintError, match="advertises no models"):
+        _ = linter.model_name
+
+
+def test_an_endpoint_without_discovery_asks_for_a_pinned_name(make_linter: MakeLinter) -> None:
+    linter = make_linter(models_status=404)
+
+    with pytest.raises(SoftmaxLintError, match="does not support model discovery"):
+        _ = linter.model_name
+
+
+def test_an_unreachable_endpoint_is_reported_as_such(make_linter: MakeLinter, server: StubServer) -> None:
+    linter = make_linter(models_status=503)
+    server.error = httpx2.ConnectError("connection refused")
+
+    with pytest.raises(SoftmaxLintError, match="could not reach vLLM"):
+        _ = linter.model_name
+
+
+def test_scoring_still_works_when_discovery_fails(make_linter: MakeLinter) -> None:
+    """A pinned name keeps the run alive when the endpoint cannot be listed."""
+    linter = make_linter(responder=fim_responder(), models_status=404, model_name="pinned/model")
+
+    assert linter.evaluate_snippet("ab") != []
 
 
 def test_only_the_tokenization_request_echoes(make_linter: MakeLinter, server: StubServer) -> None:

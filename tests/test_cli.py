@@ -48,8 +48,9 @@ def serve(monkeypatch: pytest.MonkeyPatch) -> Serve:
         responder: Callable[[str | list[str]], dict[str, Any]] | None = None,
         *,
         error: Exception | None = None,
+        models: list[str] | None = None,
     ) -> None:
-        stub = StubServer(responder=responder, error=error)
+        stub = StubServer(responder=responder, error=error, models=models)
 
         class _StubbedLinter(SoftmaxLinter):
             def __init__(self, config: Settings | None = None) -> None:
@@ -106,6 +107,43 @@ def test_check_exits_two_for_contradictory_thresholds(tmp_path: Path) -> None:
 
     assert result.exit_code == cli.EXIT_ERROR, result.output
     assert "thresholds must satisfy" in result.output
+
+
+def test_check_exits_two_when_the_served_model_is_ambiguous(tmp_path: Path, serve: Serve) -> None:
+    serve(CLEAN, models=["alias-a", "alias-b"])
+    write(tmp_path / "average.py", BUGGY_SNIPPET)
+
+    result = runner.invoke(cli.app, ["check", str(tmp_path)])
+
+    assert result.exit_code == cli.EXIT_ERROR, result.output
+    assert "advertises several models" in result.output
+    assert "alias-a" in result.output
+
+
+def test_check_names_the_discovered_model_in_its_output(tmp_path: Path, serve: Serve) -> None:
+    serve(CLEAN, models=["served/model-x"])
+    write(tmp_path / "average.py", BUGGY_SNIPPET)
+
+    result = runner.invoke(cli.app, ["check", str(tmp_path)])
+
+    assert result.exit_code == cli.EXIT_OK, result.output
+
+
+def test_a_pinned_model_survives_an_endpoint_that_lists_nothing(
+    tmp_path: Path,
+    serve: Serve,
+    settings: Settings,
+) -> None:
+    serve(CLEAN, models=[])
+    write(tmp_path / "average.py", BUGGY_SNIPPET)
+
+    undiscovered = runner.invoke(cli.app, ["check", str(tmp_path)])
+    assert undiscovered.exit_code == cli.EXIT_ERROR
+
+    settings.model_name = "pinned/model"
+    result = runner.invoke(cli.app, ["check", str(tmp_path)])
+
+    assert result.exit_code == cli.EXIT_OK, result.output
 
 
 def test_check_exits_two_when_a_file_cannot_be_decoded(tmp_path: Path, serve: Serve) -> None:

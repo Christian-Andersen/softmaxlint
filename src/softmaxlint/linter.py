@@ -11,7 +11,7 @@ reporting are unchanged by any of that: see :meth:`SoftmaxLinter.classify` and
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
-from openai import OpenAI, OpenAIError
+from openai import NotFoundError, OpenAI, OpenAIError
 
 from . import fim
 from .errors import SoftmaxLintError
@@ -56,6 +56,9 @@ class SoftmaxLinter:
     token in the candidate list, so it is scored as censored and reported
     CRITICAL -- see :meth:`token_boundaries`.
 
+    Unless :attr:`Settings.model_name` pins one, the served model is discovered
+    from the endpoint -- see :attr:`model_name`.
+
     The server is contacted lazily, so a failing endpoint surfaces as a
     :class:`SoftmaxLintError` rather than at construction.
     """
@@ -63,6 +66,54 @@ class SoftmaxLinter:
     def __init__(self, config: Settings | None = None) -> None:
         self.config: Settings = config if config is not None else Settings()
         self.client: OpenAI = OpenAI(base_url=self.config.server_base_url, api_key=self.config.api_key)
+        self._discovered: str | None = None
+
+    @property
+    def model_name(self) -> str:
+        """The model to request: the pinned name, else whatever the server serves.
+
+        Discovery happens once per linter and is cached, so a run costs a single
+        ``GET /v1/models``.
+
+        Raises:
+            SoftmaxLintError: if the endpoint cannot be reached, does not
+                support model discovery, or advertises an ambiguous set of names.
+        """
+        if self.config.model_name is not None:
+            return self.config.model_name
+        if self._discovered is None:
+            self._discovered = self._discover_model()
+        return self._discovered
+
+    def _discover_model(self) -> str:
+        """Ask the endpoint which model it is serving.
+
+        A server advertising several names is refused rather than guessed at.
+        Picking one arbitrarily could silently score with a model whose
+        tokenizer has no FIM support, which produces a confident-looking report
+        full of nonsense.
+        """
+        try:
+            listing = self.client.models.list()
+        except NotFoundError as exc:
+            msg = (
+                f"{self.config.server_base_url} does not support model discovery. "
+                "Set MODEL_NAME to the model it serves."
+            )
+            raise SoftmaxLintError(msg) from exc
+        except OpenAIError as exc:
+            msg = f"could not reach vLLM at {self.config.server_base_url}: {exc}"
+            raise SoftmaxLintError(msg) from exc
+
+        names = sorted({entry.id for entry in listing.data if entry.id})
+        if not names:
+            msg = f"{self.config.server_base_url} advertises no models. Set MODEL_NAME to name one explicitly."
+            raise SoftmaxLintError(msg)
+        if len(names) > 1:
+            listed = ", ".join(names)
+            msg = f"server advertises several models ({listed}); set MODEL_NAME to choose one."
+            raise SoftmaxLintError(msg)
+        return names[0]
 
     @property
     def markers(self) -> fim.FimMarkers:
@@ -97,7 +148,7 @@ class SoftmaxLinter:
         """POST one completion request and hand back its choices."""
         try:
             response = self.client.completions.create(
-                model=self.config.model_name,
+                model=self.model_name,
                 prompt=prompt,
                 max_tokens=1,
                 temperature=0,
