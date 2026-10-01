@@ -12,12 +12,18 @@ from typer.testing import CliRunner
 from softmaxlint import cli
 from softmaxlint.linter import SoftmaxLinter
 from softmaxlint.settings import Settings
-from tests.conftest import BUGGY_SNIPPET, StubServer, confident_scores, logprobs_payload
+from tests.conftest import (
+    BUGGY_OPERATOR,
+    BUGGY_SNIPPET,
+    StubServer,
+    fim_responder,
+    fixed_candidates,
+)
 
 runner = CliRunner()
 
-CLEAN = logprobs_payload(confident_scores(BUGGY_SNIPPET))
-DIRTY = logprobs_payload(confident_scores(BUGGY_SNIPPET, surprised="<="))
+CLEAN = fim_responder()
+DIRTY = fim_responder(surprising=BUGGY_OPERATOR)
 
 Serve = Callable[..., None]
 
@@ -38,8 +44,12 @@ def _isolate_settings(monkeypatch: pytest.MonkeyPatch, settings: Settings) -> No
 def serve(monkeypatch: pytest.MonkeyPatch) -> Serve:
     """Point the CLI at a stub vLLM endpoint."""
 
-    def _serve(body: dict[str, Any] | None = None, error: Exception | None = None) -> None:
-        stub = StubServer(body, error=error)
+    def _serve(
+        responder: Callable[[str | list[str]], dict[str, Any]] | None = None,
+        *,
+        error: Exception | None = None,
+    ) -> None:
+        stub = StubServer(responder=responder, error=error)
 
         class _StubbedLinter(SoftmaxLinter):
             def __init__(self, config: Settings | None = None) -> None:
@@ -193,8 +203,9 @@ def test_a_loosened_threshold_turns_findings_into_a_clean_run(tmp_path: Path, se
 
 
 def test_a_tightened_threshold_promotes_a_warning_to_critical(tmp_path: Path, serve: Serve) -> None:
-    serve(logprobs_payload([("foo", math.log(0.2), "bar", math.log(0.5))]))  # ratio ~0.4
-    write(tmp_path / "average.py", BUGGY_SNIPPET)
+    # ratio 0.2: a WARNING at the default thresholds, CRITICAL once crit is raised.
+    serve(fixed_candidates(math.log(0.1), math.log(0.5)))
+    write(tmp_path / "thing.py", "foo")
 
     result = runner.invoke(cli.app, ["check", str(tmp_path), "--threshold-warn", "0.9", "--threshold-crit", "0.5"])
 

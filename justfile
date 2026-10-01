@@ -15,10 +15,13 @@ audit:
     uv run -- prek run audit --all-files
 
 test:
-    uv run -- prek run test --all-files
+    uv run -- prek run test --all-files --verbose
 
 run *args:
     uv run -- softmaxlint {{ args }}
+
+calibrate *args:
+    uv run -- python scripts/calibrate.py {{ args }}
 
 up:
     podman-compose up -d

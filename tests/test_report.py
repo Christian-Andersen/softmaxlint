@@ -6,7 +6,14 @@ from pathlib import Path
 
 from softmaxlint.linter import Anomaly, SoftmaxLinter
 from softmaxlint.report import render_file, render_summary
-from tests.conftest import BUGGY_SNIPPET, Recorder, confident_scores, logprobs_payload, token_analysis
+from tests.conftest import (
+    BUGGY_OPERATOR,
+    BUGGY_SNIPPET,
+    Recorder,
+    fim_responder,
+    fixed_candidates,
+    token_analysis,
+)
 
 MakeLinter = Callable[..., SoftmaxLinter]
 
@@ -23,7 +30,7 @@ def render(linter: SoftmaxLinter, recorder: Recorder, code: str) -> list[Anomaly
 # Per-file rendering
 # ------------------------------------------------------------------------------
 def test_a_file_with_a_critical_token_renders_an_anomaly_table(make_linter: MakeLinter, console: Recorder) -> None:
-    linter = make_linter(logprobs_payload(confident_scores(BUGGY_SNIPPET, surprised="<=")))
+    linter = make_linter(responder=fim_responder(surprising=BUGGY_OPERATOR))
 
     anomalies = render(linter, console, BUGGY_SNIPPET)
 
@@ -32,18 +39,18 @@ def test_a_file_with_a_critical_token_renders_an_anomaly_table(make_linter: Make
 
 
 def test_the_table_shows_the_written_and_expected_tokens(make_linter: MakeLinter, console: Recorder) -> None:
-    linter = make_linter(logprobs_payload(confident_scores(BUGGY_SNIPPET, surprised="<=")))
+    linter = make_linter(responder=fim_responder(surprising=BUGGY_OPERATOR))
 
     render(linter, console, BUGGY_SNIPPET)
 
-    assert "'<='" in console.text
+    assert f"'{BUGGY_OPERATOR}'" in console.text
     assert "'<'" in console.text
     assert "2.00%" in console.text  # what the model thought of the written token
     assert "95.00%" in console.text  # what the model wanted instead
 
 
 def test_the_anomaly_row_reports_the_probability_ratio(make_linter: MakeLinter, console: Recorder) -> None:
-    linter = make_linter(logprobs_payload([("foo", math.log(0.1), "bar", math.log(0.5))]))
+    linter = make_linter(responder=fixed_candidates(math.log(0.1), math.log(0.5)))
 
     render(linter, console, "foo")
 
@@ -51,7 +58,7 @@ def test_the_anomaly_row_reports_the_probability_ratio(make_linter: MakeLinter, 
 
 
 def test_a_mildly_surprising_token_is_not_reported(make_linter: MakeLinter, console: Recorder) -> None:
-    linter = make_linter(logprobs_payload([("foo", math.log(0.4), "bar", math.log(0.5))]))  # ratio ~0.8
+    linter = make_linter(responder=fixed_candidates(math.log(0.4), math.log(0.5)))  # ratio ~0.8
 
     anomalies = render(linter, console, "foo")
 
@@ -60,7 +67,7 @@ def test_a_mildly_surprising_token_is_not_reported(make_linter: MakeLinter, cons
 
 
 def test_a_warning_level_token_is_labelled_a_warning(make_linter: MakeLinter, console: Recorder) -> None:
-    linter = make_linter(logprobs_payload([("foo", math.log(0.05), "bar", math.log(0.5))]))  # ratio ~0.1
+    linter = make_linter(responder=fixed_candidates(math.log(0.05), math.log(0.5)))  # ratio ~0.1
 
     anomalies = render(linter, console, "foo")
 
@@ -69,7 +76,7 @@ def test_a_warning_level_token_is_labelled_a_warning(make_linter: MakeLinter, co
 
 
 def test_a_clean_file_reports_no_findings(make_linter: MakeLinter, console: Recorder) -> None:
-    linter = make_linter(logprobs_payload(confident_scores(BUGGY_SNIPPET)))
+    linter = make_linter(responder=fim_responder())
 
     anomalies = render(linter, console, BUGGY_SNIPPET)
 
@@ -78,15 +85,15 @@ def test_a_clean_file_reports_no_findings(make_linter: MakeLinter, console: Reco
 
 
 def test_the_heading_names_the_file_that_was_checked(make_linter: MakeLinter, console: Recorder) -> None:
-    linter = make_linter(logprobs_payload(confident_scores(SIMPLE)))
+    linter = make_linter(responder=fim_responder())
 
     render(linter, console, SIMPLE)
 
     assert str(SOURCE) in console.text
 
 
-def test_a_file_with_no_tokens_renders_without_a_table(make_linter: MakeLinter, console: Recorder) -> None:
-    linter = make_linter(logprobs_payload([]))
+def test_a_file_with_no_slices_renders_without_a_table(make_linter: MakeLinter, console: Recorder) -> None:
+    linter = make_linter(responder=fim_responder())
 
     anomalies = render(linter, console, "")
 

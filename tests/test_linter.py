@@ -1,7 +1,5 @@
-"""Extraction and grading of token log probabilities."""
+"""Orchestration of FIM scoring, and grading of the results."""
 
-import json
-import math
 from collections.abc import Callable
 
 import httpx2
@@ -11,26 +9,26 @@ from softmaxlint.errors import SoftmaxLintError
 from softmaxlint.linter import SoftmaxLinter, TokenAnalysis
 from softmaxlint.settings import Settings
 from tests.conftest import (
-    BASE_URL,
     BUGGY_OPERATOR,
     BUGGY_SNIPPET,
     CONFIDENT_LOGPROB,
-    CORRECT_OPERATOR,
-    RANK_TOP,
-    RANK_WRITTEN,
-    SURPRISED_LOGPROB,
+    DEFAULT_MARKERS,
     StubServer,
-    completion_body,
-    confident_scores,
-    logprobs_payload,
-    split_tokens,
+    after_of,
+    echo_then,
+    fim_body,
+    fim_choice,
+    fim_responder,
 )
 
 MakeLinter = Callable[..., SoftmaxLinter]
 
+#: One token's worth of slices, so the demo operator is probed on its own.
+OPERATOR_SLICE = BUGGY_OPERATOR
 
-def findings(linter: SoftmaxLinter, results: list[TokenAnalysis]) -> list[tuple[str | None, str]]:
-    """Grade each result, keeping only the tokens the linter objects to."""
+
+def graded(linter: SoftmaxLinter, results: list[TokenAnalysis]) -> list[tuple[str | None, str]]:
+    """Grade each result, keeping only the slices the linter objects to."""
     return [(linter.classify(res["ratio"]), res["token"]) for res in results if linter.classify(res["ratio"])]
 
 
@@ -39,16 +37,16 @@ def findings(linter: SoftmaxLinter, results: list[TokenAnalysis]) -> list[tuple[
 # ------------------------------------------------------------------------------
 def test_off_by_one_snippet_is_flagged_on_the_boundary_operator(make_linter: MakeLinter) -> None:
     """The `<=` the model disbelieves is reported, and nothing else is."""
-    linter = make_linter(logprobs_payload(confident_scores(BUGGY_SNIPPET, surprised=BUGGY_OPERATOR)))
+    linter = make_linter(responder=fim_responder(surprising=BUGGY_OPERATOR))
 
-    findings_found = findings(linter, linter.evaluate_snippet(BUGGY_SNIPPET))
+    findings = graded(linter, linter.evaluate_snippet(BUGGY_SNIPPET))
 
-    assert findings_found == [("CRITICAL", BUGGY_OPERATOR)]
+    assert findings == [("CRITICAL", BUGGY_OPERATOR)]
 
 
-def test_off_by_one_snippet_keeps_its_tokens_verbatim(make_linter: MakeLinter) -> None:
-    """Analysis covers the snippet exactly, losing no whitespace or punctuation."""
-    linter = make_linter(logprobs_payload(confident_scores(BUGGY_SNIPPET)))
+def test_off_by_one_snippet_keeps_its_slices_verbatim(make_linter: MakeLinter) -> None:
+    """Scoring covers the snippet exactly, losing no whitespace or punctuation."""
+    linter = make_linter(responder=fim_responder())
 
     results = linter.evaluate_snippet(BUGGY_SNIPPET)
 
@@ -57,85 +55,140 @@ def test_off_by_one_snippet_keeps_its_tokens_verbatim(make_linter: MakeLinter) -
 
 def test_correcting_the_off_by_one_makes_the_snippet_clean(make_linter: MakeLinter) -> None:
     """Swapping `<=` for `<` removes the only finding."""
-    corrected = BUGGY_SNIPPET.replace(BUGGY_OPERATOR, CORRECT_OPERATOR)
-    linter = make_linter(logprobs_payload(confident_scores(corrected)))
+    corrected = BUGGY_SNIPPET.replace(BUGGY_OPERATOR, "<")
+    linter = make_linter(responder=fim_responder(surprising=BUGGY_OPERATOR))
 
-    findings_found = findings(linter, linter.evaluate_snippet(corrected))
+    findings = graded(linter, linter.evaluate_snippet(corrected))
 
-    assert findings_found == []
+    assert findings == []
+
+
+def test_a_token_the_server_cannot_place_is_still_caught(make_linter: MakeLinter) -> None:
+    """A token outside the candidate list comes back censored, so it grades CRITICAL."""
+    linter = make_linter(responder=fim_responder(surprising=BUGGY_OPERATOR, censored=True, alternative="while"))
+
+    results = linter.evaluate_snippet(BUGGY_SNIPPET)
+
+    assert graded(linter, results) == [("CRITICAL", BUGGY_OPERATOR)]
+    assert next(res for res in results if res["token"] == BUGGY_OPERATOR)["actual_prob"] == 0.0
+
+
+def test_an_alternative_that_is_only_a_prefix_masks_the_anomaly(make_linter: MakeLinter) -> None:
+    """Next-token scoring cannot see past the first token, so a shorter candidate
+    that fits the written token looks like a match. Documented, not fixed: the
+    deviation shows up on the following probe instead."""
+    linter = make_linter(responder=fim_responder(surprising=BUGGY_OPERATOR, censored=True, alternative="<"))
+
+    results = linter.evaluate_snippet(BUGGY_SNIPPET)
+
+    assert next(res for res in results if res["token"] == BUGGY_OPERATOR)["ratio"] == pytest.approx(1.0)
+
+
+def test_line_slicing_scores_line_starts_only(make_linter: MakeLinter) -> None:
+    """Documents the tradeoff behind ``fim_slice_mode="line"``: the hole is only
+    ever placed at a line start, so a mid-line operator is never probed."""
+    linter = make_linter(responder=fim_responder(surprising=BUGGY_OPERATOR), fim_slice_mode="line")
+
+    results = linter.evaluate_snippet(BUGGY_SNIPPET)
+
+    assert graded(linter, results) == []
+    assert "".join(res["token"] for res in results) == BUGGY_SNIPPET
+
+
+def test_an_empty_snippet_is_not_sent_to_the_server(make_linter: MakeLinter, server: StubServer) -> None:
+    linter = make_linter(responder=fim_responder())
+
+    assert linter.evaluate_snippet("") == []
+    assert server.requests == []
 
 
 # ------------------------------------------------------------------------------
-# Ratio arithmetic
+# Batching
 # ------------------------------------------------------------------------------
-def test_ratio_compares_written_token_against_the_top_candidate(make_linter: MakeLinter) -> None:
-    linter = make_linter(logprobs_payload([("foo", math.log(0.1), "bar", math.log(0.5))]))
+def test_the_tokenization_is_one_request_and_scoring_is_one_batch(make_linter: MakeLinter, server: StubServer) -> None:
+    linter = make_linter(responder=fim_responder())
 
-    (result,) = linter.evaluate_snippet("foo")
+    results = linter.evaluate_snippet(BUGGY_SNIPPET)
 
-    assert result["token"] == "foo"
-    assert result["top_token"] == "bar"
-    assert result["ratio"] == pytest.approx(0.2)
-    assert result["actual_prob"] == pytest.approx(0.1)
-    assert result["top_prob"] == pytest.approx(0.5)
-    assert result["surprisal"] == pytest.approx(-math.log(0.1))
-    assert result["rank"] == RANK_WRITTEN
+    tokenization, scoring = server.requests
+    assert tokenization["prompt"] == BUGGY_SNIPPET
+    assert tokenization["echo"] is True
+    assert isinstance(scoring["prompt"], list)
+    assert len(scoring["prompt"]) == len(results)
 
 
-def test_surprisal_of_a_certain_token_is_zero(make_linter: MakeLinter) -> None:
-    linter = make_linter(logprobs_payload([("foo", 0.0, "foo", 0.0)]))
+def test_each_prompt_carries_the_whole_snippet_on_both_sides(make_linter: MakeLinter, server: StubServer) -> None:
+    """This is the point of FIM: the hole is surrounded by the rest of the file."""
+    linter = make_linter(responder=fim_responder())
 
-    (result,) = linter.evaluate_snippet("foo")
+    linter.evaluate_snippet("ab cd")
 
-    assert result["surprisal"] == pytest.approx(0.0)
-
-
-def test_ratio_is_one_when_the_expected_token_has_zero_probability(make_linter: MakeLinter) -> None:
-    """Guards the divide-by-zero branch: a ratio of 0/0 must not blow up.
-
-    The log probability is finite but so low that it underflows to zero once
-    exponentiated, which is how a vanishing probability actually arrives over
-    the wire -- JSON has no infinity.
-    """
-    linter = make_linter(logprobs_payload([("foo", -1e308, "bar", -1e308)]))
-
-    (result,) = linter.evaluate_snippet("foo")
-
-    assert result["actual_prob"] == 0.0
-    assert result["ratio"] == 1.0
+    (prompts,) = server.prompts_sent[-1:]
+    # Probing the first token puts everything in the suffix; probing the last
+    # puts everything in the prefix. Either way the whole snippet is visible.
+    assert prompts[0] == "<|fim_prefix|><|fim_suffix|>ab cd<|fim_middle|>"
+    assert prompts[-1] == "<|fim_prefix|>ab <|fim_suffix|>cd<|fim_middle|>"
 
 
-def test_leading_token_without_a_distribution_is_skipped(make_linter: MakeLinter) -> None:
-    """vLLM reports no logprobs for the first prompt token; it is not analysed."""
-    linter = make_linter(logprobs_payload([("a", 0.0, "a", 0.0), ("b", 0.0, "b", 0.0)]))
+def test_scores_stay_attached_to_their_slice_when_the_server_reorders(
+    make_linter: MakeLinter,
+) -> None:
+    linter = make_linter(responder=fim_responder(surprising=BUGGY_OPERATOR, reverse_choices=True))
 
-    results = linter.evaluate_snippet("ab")
+    findings = graded(linter, linter.evaluate_snippet(BUGGY_SNIPPET))
 
-    assert [res["token"] for res in results] == ["a", "b"]
-
-
-def test_a_prompt_with_no_distributions_at_all_yields_no_results(make_linter: MakeLinter) -> None:
-    linter = make_linter(completion_body([None, None]))
-
-    assert linter.evaluate_snippet("ab") == []
+    assert findings == [("CRITICAL", BUGGY_OPERATOR)]
 
 
-def test_one_request_is_sent_per_snippet(make_linter: MakeLinter, server: StubServer) -> None:
-    linter = make_linter(logprobs_payload(confident_scores(BUGGY_SNIPPET)))
+def test_a_batch_size_smaller_than_the_file_splits_the_work(
+    make_linter: MakeLinter,
+    server: StubServer,
+) -> None:
+    linter = make_linter(responder=fim_responder(), fim_batch_size=4)
 
-    linter.evaluate_snippet(BUGGY_SNIPPET)
+    results = linter.evaluate_snippet(BUGGY_SNIPPET)
 
-    assert len(server.requests) == 1
-    request = server.requests[0]
-    assert request.method == "POST"
-    assert str(request.url) == f"{BASE_URL}/completions"
-    assert json.loads(request.content) == {
-        "model": Settings(_env_file=None).model_name,
-        "prompt": BUGGY_SNIPPET,
-        "max_tokens": 0,
-        "echo": True,
-        "prompt_logprobs": 1,
-    }
+    assert len(server.requests) > 2  # one tokenization plus several batches
+    assert "".join(res["token"] for res in results) == BUGGY_SNIPPET
+
+
+def test_the_request_asks_for_one_token_and_the_configured_candidate_count(
+    make_linter: MakeLinter,
+    server: StubServer,
+) -> None:
+    linter = make_linter(responder=fim_responder(), fim_top_logprobs=7)
+
+    linter.evaluate_snippet("ab")
+
+    (request,) = server.requests[-1:]
+    assert request["max_tokens"] == 1
+    assert request["temperature"] == 0
+    assert request["logprobs"] == 7
+    assert request["model"] == Settings(_env_file=None).model_name
+
+
+def test_only_the_tokenization_request_echoes(make_linter: MakeLinter, server: StubServer) -> None:
+    """FIM needs the distribution at the hole, which is a generation logprob."""
+    linter = make_linter(responder=fim_responder())
+
+    linter.evaluate_snippet("ab")
+
+    tokenization, scoring = server.requests
+    assert tokenization["echo"] is True
+    assert not scoring["echo"]
+    assert "prompt_logprobs" not in scoring
+
+
+def test_configured_markers_reach_the_prompt(make_linter: MakeLinter) -> None:
+    linter = make_linter(
+        responder=fim_responder(markers=DEFAULT_MARKERS),
+        fim_prefix_marker="PRE",
+        fim_suffix_marker="SUF",
+        fim_middle_marker="MID",
+    )
+
+    with pytest.raises(AssertionError, match="not a FIM prompt"):
+        linter.evaluate_snippet("ab")
 
 
 # ------------------------------------------------------------------------------
@@ -152,6 +205,7 @@ def test_one_request_is_sent_per_snippet(make_linter: MakeLinter, server: StubSe
         (0.30, None),  # equal to the warning threshold, so not a warning
         (0.31, None),
         (1.0, None),
+        (0.0, "CRITICAL"),  # a censored score always grades critical
     ],
 )
 def test_classify_grades_ratios_against_strict_thresholds(
@@ -173,10 +227,7 @@ def test_classify_follows_configured_thresholds() -> None:
 # ------------------------------------------------------------------------------
 # Error branches
 # ------------------------------------------------------------------------------
-def test_unreachable_server_raises_a_softmaxlint_error(
-    make_linter: MakeLinter,
-    settings: Settings,
-) -> None:
+def test_unreachable_server_raises_a_softmaxlint_error(make_linter: MakeLinter, settings: Settings) -> None:
     linter = make_linter(error=httpx2.ConnectError("connection refused"))
 
     with pytest.raises(SoftmaxLintError, match=f"could not reach vLLM at {settings.server_base_url}"):
@@ -186,10 +237,10 @@ def test_unreachable_server_raises_a_softmaxlint_error(
 @pytest.mark.parametrize(
     ("body", "message"),
     [
-        (completion_body([], choices=[]), "no choices"),
+        (fim_body([]), "no choices"),
         ({}, "no choices"),
-        (completion_body(None), "no prompt_logprobs"),
-        (completion_body([]), "no prompt_logprobs"),
+        (fim_body([fim_choice(0, {"a": CONFIDENT_LOGPROB}, with_logprobs=False)]), "no logprobs"),
+        (fim_body([fim_choice(0, {})]), "empty candidate set"),
     ],
 )
 def test_malformed_server_responses_raise_a_softmaxlint_error(
@@ -197,31 +248,40 @@ def test_malformed_server_responses_raise_a_softmaxlint_error(
     body: dict[str, object],
     message: str,
 ) -> None:
-    linter = make_linter(body)
+    linter = make_linter(responder=echo_then(body))
 
     with pytest.raises(SoftmaxLintError, match=message):
-        linter.evaluate_snippet("foo")
+        linter.evaluate_snippet("ab")
+
+
+def test_the_wrong_number_of_choices_is_reported(make_linter: MakeLinter) -> None:
+    linter = make_linter(responder=echo_then(fim_body([fim_choice(0, {"a": CONFIDENT_LOGPROB})])))
+
+    with pytest.raises(SoftmaxLintError, match="expected 3 scored prompts, server returned 1"):
+        linter.evaluate_snippet("ab cd")
 
 
 # ------------------------------------------------------------------------------
-# Fixture helpers
+# Markers
 # ------------------------------------------------------------------------------
-def test_split_tokens_reconstructs_the_input() -> None:
-    assert "".join(split_tokens(BUGGY_SNIPPET)) == BUGGY_SNIPPET
+def test_the_linter_writes_the_configured_markers() -> None:
+    config = Settings(_env_file=None, fim_prefix_marker="A", fim_suffix_marker="B", fim_middle_marker="C")
+
+    assert SoftmaxLinter(config=config).markers.prefix == "A"
 
 
-def test_split_tokens_keeps_operators_whole() -> None:
-    assert "<=" in split_tokens(BUGGY_SNIPPET)
+def test_default_markers_are_the_qwen_spelling() -> None:
+    assert SoftmaxLinter(config=Settings(_env_file=None)).markers == (
+        "<|fim_prefix|>",
+        "<|fim_suffix|>",
+        "<|fim_middle|>",
+    )
 
 
-def test_logprobs_payload_marks_the_top_candidate_with_rank_one() -> None:
-    body = logprobs_payload([("foo", SURPRISED_LOGPROB, CORRECT_OPERATOR, CONFIDENT_LOGPROB)])
+def test_prompts_reassemble_the_snippet_around_the_hole(make_linter: MakeLinter, server: StubServer) -> None:
+    linter = make_linter(responder=fim_responder())
 
-    choices = body["choices"]
-    assert isinstance(choices, list)
-    position = choices[0]["prompt_logprobs"]
-    assert position[0] is None  # no distribution for the first prompt token
-    assert position[1] == {
-        "0": {"logprob": SURPRISED_LOGPROB, "decoded_token": "foo", "rank": RANK_WRITTEN},
-        "1": {"logprob": CONFIDENT_LOGPROB, "decoded_token": CORRECT_OPERATOR, "rank": RANK_TOP},
-    }
+    linter.evaluate_snippet("ab cd")
+
+    (prompts,) = server.prompts_sent[-1:]
+    assert [after_of(prompt) for prompt in prompts] == ["ab cd", " cd", "cd"]
