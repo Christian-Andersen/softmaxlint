@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     file in the working directory is read as a fallback.
     """
 
-    server_base_url: str = "http://localhost:8000/v1"
+    server_base_url: str = "http://127.0.0.1:18020/v1"
 
     # Which model to score with. Left unset by default: the served model is
     # discovered from the endpoint instead, so upgrading the server does not

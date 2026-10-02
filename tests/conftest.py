@@ -44,7 +44,7 @@ CONFIDENT_LOGPROB = math.log(0.95)
 #: ...and for "the model barely believed this token".
 SURPRISED_LOGPROB = math.log(0.02)
 
-BASE_URL = "http://localhost:8000/v1"
+BASE_URL = "http://127.0.0.1:18020/v1"
 
 #: What the stub endpoint claims to serve.
 SERVED_MODEL = "stub-served-model"

@@ -18,6 +18,19 @@ dependencies = [
 [project.scripts]
 softmaxlint = "softmaxlint:main"
 
+# Only needed by scripts/spike_diffusion_scorer.py, which evaluates whether
+# DiffusionGemma's bidirectional canvas can replace FIM prompting. Kept out of
+# the runtime dependencies on purpose: the linter itself talks over HTTP and
+# needs none of this.
+[project.optional-dependencies]
+spike = [
+  "accelerate>=1.10",
+  "bitsandbytes>=0.48",
+  "compressed-tensors>=0.15.0",
+  "torch>=2.9",
+  "transformers>=5.5",
+]
+
 [build-system]
 requires = ["uv_build>=0.12.17,<0.13.0"]
 build-backend = "uv_build"
@@ -41,6 +54,10 @@ ignore = [
 convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
+# The spike scripts import their optional dependencies inside functions, so
+# `--help` still works and a missing dependency gives a readable message rather
+# than a traceback at import time.
+"scripts/spike_*.py" = ["PLC0415"]
 "tests/**" = [
   "S101",    # assert
   "S105",    # hardcoded-password-string

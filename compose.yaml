@@ -1,18 +1,35 @@
 services:
   softmaxlint_vllm:
-    image: docker.io/vllm/vllm-openai:latest
+    image: ghcr.io/syv-ai/hyperqwen:latest
     container_name: softmaxlint_vllm
     ipc: host
-    ports:
-      - "8000:8000"
-    command:
-      - "--model"
-      - "Qwen/Qwen3.5-0.8B"
-      - "--host"
-      - "0.0.0.0"
-      - "--port"
-      - "8000"
+    # "single", not "batch". Batch mode is plain batching, but it OOMs on a 24 GB
+    # card during engine init (22.9 GiB in use, 250 MiB free) -- the
+    # single-user mode's int8-KV speculation patches are what make it fit here.
+    command: single
+    # Host networking, not a published port. The image detects whether it is
+    # containerised via /.dockerenv and /proc/1/cgroup, and under podman both
+    # come back negative -- so with no VLLM_API_KEY set it binds 127.0.0.1
+    # inside the container. A published port forwards to the container's
+    # external interface and can never reach a loopback listener, so sharing
+    # the host network is what makes :18020 reachable at all.
+    network_mode: host
+    environment:
+      # gpu_memory_utilization defaults to 0.93 of total VRAM, more than this
+      # 24 GB card has free whenever anything else touches the GPU. And the
+      # default 65536 context wants 4.76 GiB of KV cache, which does not fit
+      # alongside the weights at that utilisation. softmaxlint only ever sends a
+      # file-sized prompt, so 8k is generous. EXTRA_ARGS is expanded after the
+      # image's own flags, so these override rather than append.
+      EXTRA_ARGS: >-
+        --gpu-memory-utilization 0.75 --max-model-len 8192
     devices:
       - "nvidia.com/gpu=all"
     volumes:
       - ~/.cache/huggingface:/root/.cache/huggingface:z
+      # The ~24 GB requantized model. Bind-mounted rather than left as an
+      # anonymous volume so recreating the container is cheap: the first start
+      # otherwise re-downloads 19.5 GB and re-quantises it.
+      - ~/.cache/hyperqwen/models:/app/models:z
+    security_opt:
+      - label=disable
