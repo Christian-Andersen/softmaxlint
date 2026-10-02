@@ -8,6 +8,7 @@ authors = [
 ]
 requires-python = ">=3.14"
 dependencies = [
+    "compressed-tensors>=0.19.0",
     "openai>=3.22.1",
     "pathspec>=1.1.1",
     "pydantic-settings>=2.15.0",
