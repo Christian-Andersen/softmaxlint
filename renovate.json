@@ -1,3 +1,32 @@
 {
-  "$schema": "https://docs.renovatebot.com/renovate-schema.json"
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "The interpreter is pinned by hand in .python-version and has to stay in step with requires-python, so neither is left to Renovate. The compose files reference ghcr.io/syv-ai/hyperqwen:latest, which carries no resolvable version, so the docker-compose manager has nothing to track there either. flake.lock is kept current by lock file maintenance, not by a digest rule: flake inputs here pin no rev in flake.nix, so the nix manager only ever emits lockedVersion updates.",
+  "extends": ["config:recommended", ":disableDependencyDashboard"],
+  "semanticCommits": "enabled",
+  "nix": {
+    "enabled": true
+  },
+  "lockFileMaintenance": {
+    "enabled": true
+  },
+  "packageRules": [
+    {
+      "description": "Group non-major CI action updates in .forgejo/workflows; major bumps get their own PR",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["patch", "minor"],
+      "groupName": "CI workflow actions",
+      "groupSlug": "ci-workflow-actions"
+    },
+    {
+      "description": "Bump the interpreter by hand: .python-version pins a uv-flavoured build (a +gil or +freethreaded suffix), which the pyenv manager cannot resolve because it looks versions up in the Docker registry, and cannot rewrite without dropping the suffix",
+      "matchManagers": ["pyenv"],
+      "enabled": false
+    },
+    {
+      "description": "Keep requires-python in step with .python-version, which is managed by hand",
+      "matchManagers": ["pep621"],
+      "matchDepTypes": ["requires-python"],
+      "enabled": false
+    }
+  ]
 }
