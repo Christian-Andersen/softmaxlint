@@ -46,7 +46,9 @@ def render_file(console: Console, path: Path, results: Sequence[TokenAnalysis], 
 
     # Printed on its own line: a long path in a panel title gets cropped, and
     # knowing which file a heatmap belongs to matters more than the branding.
-    console.print(f"[bold cyan]{path}[/bold cyan]")
+    # soft_wrap keeps it that way on a narrow terminal too -- Rich would
+    # otherwise fold the line mid-filename, leaving an unreadable path.
+    console.print(f"[bold cyan]{path}[/bold cyan]", soft_wrap=True)
     console.print(
         Panel(
             heatmap_text,
