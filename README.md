@@ -32,7 +32,7 @@ just test    # pytest (stubbed server, no GPU needed)
 just ci      # what CI runs
 ```
 
-Live runs need the server above and are slow (~17 s per 256-prompt batch on
-an RTX 3090). `scripts/calibrate.py` reports false-positive rate, recall, and
+Live runs need the server above; scoring a file takes a few dozen server
+round-trips, so large trees take a while. `scripts/calibrate.py` reports false-positive rate, recall, and
 censoring rate over `corpus/`; run it before trusting a change to scoring or
 grading.

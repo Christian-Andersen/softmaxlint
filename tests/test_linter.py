@@ -25,9 +25,6 @@ from tests.conftest import (
 
 MakeLinter = Callable[..., SoftmaxLinter]
 
-#: One token's worth of slices, so the demo operator is probed on its own.
-OPERATOR_SLICE = BUGGY_OPERATOR
-
 
 def graded(linter: SoftmaxLinter, results: list[TokenAnalysis]) -> list[tuple[str | None, str]]:
     """Grade each result, keeping only the slices the linter objects to."""
