@@ -59,13 +59,11 @@ def render_file(console: Console, path: Path, results: Sequence[TokenAnalysis], 
     )
 
     if not anomalies:
-        console.print(
-            "\n[bold green]✅ No token anomalies detected. Code conforms to model expectations.[/bold green]\n"
-        )
+        console.print("\n[bold green]No token anomalies detected. Code conforms to model expectations.[/bold green]\n")
         return anomalies
 
     table = Table(
-        title=f"⚠️  FOUND {len(anomalies)} POTENTIAL ANOMALIES",
+        title=f"FOUND {len(anomalies)} POTENTIAL ANOMALIES",
         title_style="bold yellow",
         header_style="bold magenta",
     )
