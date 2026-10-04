@@ -271,6 +271,28 @@ def test_a_zero_probability_top_candidate_does_not_divide_by_zero() -> None:
     assert fim.parse_choice(choice, slice_of("alpha"))["ratio"] == 1.0
 
 
+def test_an_end_of_text_fallback_is_not_the_top_pick() -> None:
+    """Long FIM prompts make the model end the document instead of filling
+    the hole, so the top pick is the best non-control candidate."""
+    slice_ = slice_of(" self")
+    choice = choice_for({"<|endoftext|>": math.log(0.9), " self": math.log(0.05), "<|fim_pad|>": math.log(0.03)})
+
+    analysis = fim.parse_choice(choice, slice_)
+
+    assert analysis["top_token"] == " self"
+    assert analysis["ratio"] == pytest.approx(1.0)
+
+
+def test_a_written_control_token_still_matches() -> None:
+    """A marker written inside a string literal still matches."""
+    slice_ = slice_of("<|fim_prefix|>")
+    choice = choice_for({"<|endoftext|>": math.log(0.5), "<|fim_prefix|>": CONFIDENT_LOGPROB})
+
+    analysis = fim.parse_choice(choice, slice_)
+
+    assert analysis["ratio"] == pytest.approx(1.0)
+
+
 def test_a_choice_without_logprobs_is_rejected() -> None:
     choice = fim_choice(0, {"alpha": CONFIDENT_LOGPROB}, with_logprobs=False)
 

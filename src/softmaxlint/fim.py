@@ -41,6 +41,36 @@ DEFAULT_PREFIX_MARKER = "<|fim_prefix|>"
 DEFAULT_SUFFIX_MARKER = "<|fim_suffix|>"
 DEFAULT_MIDDLE_MARKER = "<|fim_middle|>"
 
+#: Control tokens, excluded from top selection in :func:`parse_choice`. Past
+#: ~1000 chars of FIM context the model falls back to ``<|endoftext|>`` top-1
+#: at 0.6-0.9 for ordinary mid-file tokens; the ranking below it is
+#: unaffected, so the top pick is taken over the remaining candidates.
+#: Matching still considers the full list, so a marker written inside a
+#: string literal still matches.
+CONTROL_TOKENS = frozenset(
+    {
+        "<|endoftext|>",
+        "<|fim_prefix|>",
+        "<|fim_suffix|>",
+        "<|fim_middle|>",
+        "<|fim_pad|>",
+        "<|file_sep|>",
+        "<|repo_name|>",
+        "<|im_start|>",
+        "<|im_end|>",
+        "<fim_prefix>",
+        "<fim_suffix>",
+        "<fim_middle>",
+        "<PRE>",
+        "<SUF>",
+        "<MID>",
+        "<EOT>",
+    }
+)
+
+#: Pipe-wrapped fallback for model families not listed above.
+CONTROL_TOKEN_RE = re.compile(r"^<\|.*\|>$")
+
 #: Fallback splitter for when the server cannot report a tokenization.
 #:
 #: Deliberately coarse. It merges runs of punctuation and whitespace into single
@@ -150,6 +180,11 @@ def parse_offsets(choice: dict[str, Any], source: str) -> list[int]:
     return usable
 
 
+def is_control_token(token: str) -> bool:
+    """True when ``token`` is model control traffic rather than source code."""
+    return token in CONTROL_TOKENS or CONTROL_TOKEN_RE.match(token) is not None
+
+
 def _top_logprobs(choice: dict[str, Any]) -> dict[str, float]:
     """Pull the first generated token's candidate distribution out of a choice."""
     logprobs: dict[str, Any] | None = choice.get("logprobs")
@@ -196,13 +231,19 @@ def parse_choice(choice: dict[str, Any], slice_: Slice) -> TokenAnalysis:
     ``actual_prob == 0.0`` -- a ratio of zero, which grades as CRITICAL -- and
     ``surprisal`` carries the floor we can actually vouch for: the surprisal of
     the least surprising candidate we did receive.
+
+    The top pick skips control tokens (see ``CONTROL_TOKENS``). Matching uses
+    the full list, so a marker written inside a string literal still matches.
     """
     candidates = _top_logprobs(choice)
     if not candidates:
         msg = "server returned an empty candidate set for the FIM middle token."
         raise SoftmaxLintError(msg)
 
-    top_token, top_logprob = max(candidates.items(), key=lambda item: item[1])
+    scored = {token: logprob for token, logprob in candidates.items() if not is_control_token(token)}
+    if not scored:
+        scored = candidates
+    top_token, top_logprob = max(scored.items(), key=lambda item: item[1])
     top_prob = math.exp(top_logprob)
 
     match = _match_source(candidates, slice_)

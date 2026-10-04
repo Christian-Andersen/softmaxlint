@@ -65,6 +65,16 @@ class Settings(BaseSettings):
     # slices concurrently.
     fim_batch_size: int = 256
 
+    # Minimum top-candidate probability for a finding to count. Below it the
+    # distribution is flat and a low ratio means one guess among many, not a
+    # wrong token.
+    min_top_prob: float = 0.5
+
+    # Skip strings and comments without asking the server. Prose surprisal is
+    # not a code signal; skipped spans are recorded as trivially expected.
+    # Skipping also shrinks each file's request count.
+    score_strings_and_comments: bool = False
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     @field_validator("model_name", mode="before")

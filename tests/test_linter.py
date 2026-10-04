@@ -20,6 +20,7 @@ from tests.conftest import (
     fim_body,
     fim_choice,
     fim_responder,
+    token_analysis,
 )
 
 MakeLinter = Callable[..., SoftmaxLinter]
@@ -30,7 +31,7 @@ OPERATOR_SLICE = BUGGY_OPERATOR
 
 def graded(linter: SoftmaxLinter, results: list[TokenAnalysis]) -> list[tuple[str | None, str]]:
     """Grade each result, keeping only the slices the linter objects to."""
-    return [(linter.classify(res["ratio"]), res["token"]) for res in results if linter.classify(res["ratio"])]
+    return [(linter.classify(res), res["token"]) for res in results if linter.classify(res)]
 
 
 # ------------------------------------------------------------------------------
@@ -115,7 +116,10 @@ def test_the_tokenization_is_one_request_and_scoring_is_one_batch(make_linter: M
     assert tokenization["prompt"] == BUGGY_SNIPPET
     assert tokenization["echo"] is True
     assert isinstance(scoring["prompt"], list)
-    assert len(scoring["prompt"]) == len(results)
+    # Whitespace slices are recorded without a round-trip, so the batch holds
+    # one prompt per scorable slice rather than one per slice.
+    assert len(scoring["prompt"]) == sum(1 for res in results if res["token"].strip())
+    assert len(scoring["prompt"]) < len(results)
 
 
 def test_each_prompt_carries_the_whole_snippet_on_both_sides(make_linter: MakeLinter, server: StubServer) -> None:
@@ -291,13 +295,40 @@ def test_classify_grades_ratios_against_strict_thresholds(
 ) -> None:
     linter = SoftmaxLinter(config=settings)
 
-    assert linter.classify(ratio) == expected
+    assert linter.classify(token_analysis(ratio=ratio)) == expected
 
 
 def test_classify_follows_configured_thresholds() -> None:
     linter = SoftmaxLinter(config=Settings(_env_file=None, threshold_warn=0.90, threshold_crit=0.80))
 
-    assert linter.classify(0.85) == "WARNING"
+    assert linter.classify(token_analysis(ratio=0.85)) == "WARNING"
+
+
+def test_classify_ignores_whitespace_only_slices(settings: Settings) -> None:
+    """Whitespace-only slices are never findings."""
+    linter = SoftmaxLinter(config=settings)
+    blank = token_analysis(ratio=0.0)
+    blank["token"] = "   "
+
+    assert linter.classify(blank) is None
+
+
+def test_classify_needs_a_confident_model(settings: Settings) -> None:
+    """A low ratio under a flat distribution is one guess among many."""
+    linter = SoftmaxLinter(config=settings)
+    unsure = token_analysis(ratio=0.01)
+    unsure["top_prob"] = 0.2
+
+    assert linter.classify(unsure) is None
+
+
+def test_classify_ignores_a_missing_docstring_suggestion(settings: Settings) -> None:
+    """A model asking for a docstring says nothing about the written token."""
+    linter = SoftmaxLinter(config=settings)
+    docstring_wanted = token_analysis(ratio=0.01)
+    docstring_wanted["top_token"] = ' """'
+
+    assert linter.classify(docstring_wanted) is None
 
 
 # ------------------------------------------------------------------------------
@@ -333,7 +364,8 @@ def test_malformed_server_responses_raise_a_softmaxlint_error(
 def test_the_wrong_number_of_choices_is_reported(make_linter: MakeLinter) -> None:
     linter = make_linter(responder=echo_then(fim_body([fim_choice(0, {"a": CONFIDENT_LOGPROB})])))
 
-    with pytest.raises(SoftmaxLintError, match="expected 3 scored prompts, server returned 1"):
+    # "ab cd" is three slices, but the whitespace one is never sent.
+    with pytest.raises(SoftmaxLintError, match="expected 2 scored prompts, server returned 1"):
         linter.evaluate_snippet("ab cd")
 
 
@@ -360,4 +392,23 @@ def test_prompts_reassemble_the_snippet_around_the_hole(make_linter: MakeLinter,
     linter.evaluate_snippet("ab cd")
 
     (prompts,) = server.prompts_sent[-1:]
-    assert [after_of(prompt) for prompt in prompts] == ["ab cd", " cd", "cd"]
+    # The whitespace slice between the words is recorded without a probe.
+    assert [after_of(prompt) for prompt in prompts] == ["ab cd", "cd"]
+
+
+def test_string_spans_are_recorded_without_a_probe(make_linter: MakeLinter, server: StubServer) -> None:
+    """String literals are not scored by default."""
+    source = 'x = "ab"\n'
+    linter = make_linter(responder=fim_responder())
+
+    results = linter.evaluate_snippet(source)
+
+    assert "".join(res["token"] for res in results) == source
+    (prompts,) = server.prompts_sent[-1:]
+    assert len(prompts) == 2  # 'x' and '='; whitespace and the string are policy-skipped
+
+    full = make_linter(responder=fim_responder(), score_strings_and_comments=True)
+    full.evaluate_snippet(source)
+
+    (all_prompts,) = server.prompts_sent[-1:]
+    assert len(all_prompts) == 5  # everything but the whitespace

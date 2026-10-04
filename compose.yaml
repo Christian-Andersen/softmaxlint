@@ -1,7 +1,17 @@
+# Qwen2.5-Coder-7B, served for FIM scoring.
+#
+# Qwen3-family checkpoints declare <|fim_*|> tokens but were not trained for
+# FIM: every hole scores '\n', which carries no signal. Qwen2.5-Coder fills
+# FIM holes as expected; `just calibrate` measures FP ~1.2% of tokens and
+# recall 3/4 seeded bug types against it.
+#
+#   just up
+#   MODEL_NAME=coder-7b just calibrate
+#   just down
 services:
-  softmaxlint_vllm:
+  softmaxlint:
     image: ghcr.io/syv-ai/hyperqwen:latest
-    container_name: softmaxlint_vllm
+    container_name: softmaxlint
     ipc: host
     # "single", not "batch". Batch mode is plain batching, but it OOMs on a 24 GB
     # card during engine init (22.9 GiB in use, 250 MiB free) -- the
@@ -15,21 +25,28 @@ services:
     # the host network is what makes :18020 reachable at all.
     network_mode: host
     environment:
-      # gpu_memory_utilization defaults to 0.93 of total VRAM, more than this
-      # 24 GB card has free whenever anything else touches the GPU. And the
-      # default 65536 context wants 4.76 GiB of KV cache, which does not fit
-      # alongside the weights at that utilisation. softmaxlint only ever sends a
-      # file-sized prompt, so 8k is generous. EXTRA_ARGS is expanded after the
-      # image's own flags, so these override rather than append.
+      # The image bakes in its own checkpoint; MODEL is what start_qwen.sh passes
+      # straight to `vllm serve`. A Hub id resolves through the bind-mounted HF
+      # cache below, so a warm cache is all this needs.
+      MODEL: Qwen/Qwen2.5-Coder-7B
       EXTRA_ARGS: >-
-        --gpu-memory-utilization 0.75 --max-model-len 8192
+        --gpu-memory-utilization 0.85 --max-model-len 8192
+        --served-model-name coder-7b
+      # Qwen2.5-Coder-7B has no multi-token-prediction head, so the image's default
+      # speculative method cannot apply to it.
+      SPEC: none
+      # The image's verify.sh refuses to start unless lm_head and embed_tokens
+      # have been requantized for its own int4 kernels. This checkpoint is a
+      # plain bf16 model being scored for likelihoods, not served for speed,
+      # so those checks do not apply.
+      VERIFY: "0"
     devices:
       - "nvidia.com/gpu=all"
     volumes:
       - ~/.cache/huggingface:/root/.cache/huggingface:z
-      # The ~24 GB requantized model. Bind-mounted rather than left as an
-      # anonymous volume so recreating the container is cheap: the first start
-      # otherwise re-downloads 19.5 GB and re-quantises it.
+      # The image's entrypoint downloads and requantizes its baked-in
+      # checkpoint on first boot even though stage 3 serves MODEL above.
+      # Bind-mounted so that download happens once, not on every recreate.
       - ~/.cache/hyperqwen/models:/app/models:z
     security_opt:
       - label=disable

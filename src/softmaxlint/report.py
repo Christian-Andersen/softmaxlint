@@ -37,7 +37,7 @@ def render_file(console: Console, path: Path, results: Sequence[TokenAnalysis], 
     anomalies: list[Anomaly] = []
 
     for idx, res in enumerate(results):
-        level: AnomalyLevel | None = linter.classify(res["ratio"])
+        level: AnomalyLevel | None = linter.classify(res)
         if level is None:
             heatmap_text.append(res["token"])
             continue

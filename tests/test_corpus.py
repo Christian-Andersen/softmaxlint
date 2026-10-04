@@ -25,7 +25,7 @@ BUG_FILES = sorted(BUG_DIR.glob("*.py"))
 def flagged(linter: SoftmaxLinter, path: Path) -> list[tuple[str, str]]:
     """Every graded token in ``path``, as (level, token)."""
     results = linter.evaluate_snippet(path.read_text(encoding="utf-8"))
-    return [(level, analysis["token"]) for analysis in results if (level := linter.classify(analysis["ratio"]))]
+    return [(level, analysis["token"]) for analysis in results if (level := linter.classify(analysis))]
 
 
 # ------------------------------------------------------------------------------
@@ -78,7 +78,7 @@ def test_a_seeded_defect_is_flagged_on_its_marked_token(make_linter, path: Path)
 
     linter = make_linter(responder=FimStub(surprising=expected, alternative="zzz"))
 
-    assert ("CRITICAL", expected) in flagged(linter, path)
+    assert any(level == "CRITICAL" and token.strip() == expected for level, token in flagged(linter, path))
 
 
 @pytest.mark.parametrize("path", BUG_FILES, ids=lambda p: p.name)

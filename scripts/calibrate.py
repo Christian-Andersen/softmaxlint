@@ -84,10 +84,12 @@ def score(path: Path, linter: SoftmaxLinter) -> FileReport:
         report.tokens += 1
         if analysis["actual_prob"] == 0.0:
             report.censored += 1
-        level = linter.classify(analysis["ratio"])
+        level = linter.classify(analysis)
         if level is not None:
             report.findings[analysis["token"]] += 1
-            if report.expected and analysis["token"] == report.expected:
+            # The tokenizer folds preceding whitespace into the token
+            # (``' =='``), while a BUG marker names it bare (``"=="``).
+            if report.expected and analysis["token"].strip() == report.expected:
                 report.hit_expected = True
 
     return report

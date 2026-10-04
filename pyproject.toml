@@ -1,7 +1,7 @@
 [project]
 name = "softmaxlint"
 version = "0.1.0"
-description = "Add your description here"
+description = "Probabilistic Python linter: flags tokens a code model found improbable"
 readme = "README.md"
 authors = [
     { name = "Christian Andersen", email = "cdandersen98@gmail.com" }

@@ -8,6 +8,8 @@ reporting are unchanged by any of that: see :meth:`SoftmaxLinter.classify` and
 :mod:`softmaxlint.report`.
 """
 
+import io
+import tokenize
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
@@ -42,6 +44,29 @@ class Anomaly:
     index: int
     level: AnomalyLevel
     analysis: TokenAnalysis
+
+
+def _prose_spans(source: str) -> list[tuple[int, int]]:
+    """Character spans of strings and comments in ``source``.
+
+    Returns an empty list when the source does not tokenize, in which case
+    everything scores.
+    """
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
+    except tokenize.TokenError, SyntaxError, ValueError:
+        return []
+    offsets = [0]
+    for line in source.splitlines(keepends=True):
+        offsets.append(offsets[-1] + len(line))
+    spans = []
+    for token in tokens:
+        if token.type not in (tokenize.STRING, tokenize.COMMENT):
+            continue
+        (start_line, start_col), (end_line, end_col) = token.start, token.end
+        if start_line - 1 < len(offsets) and end_line - 1 < len(offsets):
+            spans.append((offsets[start_line - 1] + start_col, offsets[end_line - 1] + end_col))
+    return spans
 
 
 class SoftmaxLinter:
@@ -124,14 +149,29 @@ class SoftmaxLinter:
             middle=self.config.fim_middle_marker,
         )
 
-    def classify(self, ratio: float) -> AnomalyLevel | None:
-        """Grade a written/expected probability ratio, or ``None`` if it is fine.
+    def classify(self, analysis: TokenAnalysis) -> AnomalyLevel | None:
+        """Grade one scored token, or ``None`` if it is fine.
 
-        Thresholds are strict: a ratio exactly equal to a threshold is not an
-        anomaly at that level. A censored score -- a slice the server could not
-        even place in its candidate list -- comes through as a ratio of zero
-        and so always grades CRITICAL.
+        Skipped before the ratio thresholds: whitespace-only slices; tokens
+        scored while the model was unpeaked (``top_prob`` below
+        ``min_top_prob``); and tokens where the top pick is whitespace or a
+        docstring delimiter, which asks for something to be added rather than
+        grading what was written.
+
+        Past those, thresholds are strict: a ratio exactly equal to a
+        threshold is not an anomaly at that level. A censored score -- a slice
+        the server could not even place in its candidate list -- comes through
+        as a ratio of zero and so always grades CRITICAL.
         """
+        if not analysis["token"].strip():
+            return None
+        if analysis["top_prob"] < self.config.min_top_prob:
+            return None
+        if not analysis["top_token"].strip() or analysis["top_token"].strip() in ('"""', "'''"):
+            # Whitespace or a docstring delimiter on top: a request to add
+            # something, not a verdict on the written token.
+            return None
+        ratio = analysis["ratio"]
         if ratio < self.config.threshold_crit:
             return "CRITICAL"
         if ratio < self.config.threshold_warn:
@@ -189,6 +229,20 @@ class SoftmaxLinter:
                 raise
             return fim.slice_source(source, "coarse")
 
+    def _should_score(self, source: str, slice_: Slice) -> bool:
+        """Whether ``slice_`` is worth a server round-trip.
+
+        Whitespace is formatting, and (unless ``score_strings_and_comments``
+        says otherwise) strings and comments are prose: surprisal there is not
+        a code signal. Skipped slices are recorded as trivially expected, so
+        this only shrinks the request count, never the report.
+        """
+        if not slice_.text.strip():
+            return False
+        if self.config.score_strings_and_comments:
+            return True
+        return not any(start <= slice_.start < end for start, end in _prose_spans(source))
+
     def evaluate_snippet(self, code_text: str) -> list[TokenAnalysis]:
         """Score every token of ``code_text`` with bidirectional context.
 
@@ -208,7 +262,8 @@ class SoftmaxLinter:
             return []
 
         markers = self.markers
-        prompts = [fim.build_prompt(code_text, slice_.start, markers) for slice_ in slices]
+        runnable = [index for index, slice_ in enumerate(slices) if self._should_score(code_text, slice_)]
+        prompts = [fim.build_prompt(code_text, slices[index].start, markers) for index in runnable]
 
         scored: list[dict[str, Any]] = []
         batch_size = self.config.fim_batch_size
@@ -216,4 +271,23 @@ class SoftmaxLinter:
             batch = prompts[offset : offset + batch_size]
             scored.extend(fim.order_choices(self._request(batch, logprobs=self.config.fim_top_logprobs), len(batch)))
 
-        return [fim.parse_choice(choice, slice_) for choice, slice_ in zip(scored, slices, strict=True)]
+        parsed = {
+            index: fim.parse_choice(choice, slices[index]) for index, choice in zip(runnable, scored, strict=True)
+        }
+        return [
+            parsed.get(
+                index,
+                {
+                    # Unscored by policy (a string, comment, or whitespace): recorded
+                    # as trivially expected so reporting still reassembles the file.
+                    "token": slice_.text,
+                    "actual_prob": 1.0,
+                    "top_prob": 1.0,
+                    "top_token": slice_.text,
+                    "ratio": 1.0,
+                    "surprisal": 0.0,
+                    "rank": 1,
+                },
+            )
+            for index, slice_ in enumerate(slices)
+        ]
