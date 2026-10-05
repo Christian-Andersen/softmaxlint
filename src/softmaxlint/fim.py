@@ -256,7 +256,7 @@ def parse_choice(choice: dict[str, Any], slice_: Slice) -> TokenAnalysis:
             "top_prob": top_prob,
             "top_token": top_token,
             "ratio": 0.0,
-            "surprisal": -min(candidates.values()),
+            "surprisal": -min(scored.values()),
             # Ranked below everything the server was willing to name.
             "rank": len(candidates) + 1,
         }
