@@ -13,6 +13,7 @@ from tests.conftest import (
     BUGGY_OPERATOR,
     BUGGY_SNIPPET,
     Serve,
+    StubServer,
     fim_responder,
     fixed_candidates,
 )
@@ -190,9 +191,7 @@ def test_check_reports_when_there_is_nothing_to_lint(tmp_path: Path) -> None:
     assert "no Python files to check" in result.output
 
 
-def test_check_skips_blank_files_without_asking_the_server(
-    tmp_path: Path, serve: Serve, server: StubServer
-) -> None:
+def test_check_skips_blank_files_without_asking_the_server(tmp_path: Path, serve: Serve, server: StubServer) -> None:
     serve(CLEAN)
     write(tmp_path / "blank.py", "\n\n")
     write(tmp_path / "average.py", BUGGY_SNIPPET)
