@@ -129,11 +129,7 @@ def check(
 
     targets = list(paths) if paths else [Path.cwd()]
 
-    try:
-        files = collect_python_files(targets, respect_gitignore=respect_gitignore)
-    except SoftmaxLintError as exc:
-        console.print(f"[bold red]error:[/bold red] {exc}")
-        raise typer.Exit(code=EXIT_ERROR) from exc
+    files = _collect_files(console, targets, respect_gitignore=respect_gitignore)
 
     if not files:
         console.print("[dim]no Python files to check[/dim]")
@@ -212,11 +208,7 @@ def lsp_check(
 
     targets = list(paths) if paths else [Path.cwd()]
 
-    try:
-        files = collect_python_files(targets, respect_gitignore=respect_gitignore)
-    except SoftmaxLintError as exc:
-        console.print(f"[bold red]error:[/bold red] {exc}")
-        raise typer.Exit(code=EXIT_ERROR) from exc
+    files = _collect_files(console, targets, respect_gitignore=respect_gitignore)
 
     linter = SoftmaxLinter(config=settings)
     try:
@@ -236,6 +228,15 @@ def lsp_check(
     if findings:
         raise typer.Exit(code=EXIT_FINDINGS)
     raise typer.Exit(code=EXIT_OK)
+
+
+def _collect_files(console: Console, targets: list[Path], *, respect_gitignore: bool) -> list[Path]:
+    """Resolve targets to files, or exit 2 when a path is unusable."""
+    try:
+        return collect_python_files(targets, respect_gitignore=respect_gitignore)
+    except SoftmaxLintError as exc:
+        console.print(f"[bold red]error:[/bold red] {exc}")
+        raise typer.Exit(code=EXIT_ERROR) from exc
 
 
 def _lsp_check_files(
