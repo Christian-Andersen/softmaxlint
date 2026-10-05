@@ -75,6 +75,11 @@ class Settings(BaseSettings):
     # Skipping also shrinks each file's request count.
     score_strings_and_comments: bool = False
 
+    # Presentation for `lsp check`, mirroring `ruff check --output-format`.
+    # Only concise (human) and json (machine) are offered; the SARIF/JUnit
+    # CI-reporter formats have no editor use.
+    output_format: Literal["concise", "json"] = "json"
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     @field_validator("model_name", mode="before")

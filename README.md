@@ -32,6 +32,31 @@ just test    # pytest (stubbed server, no GPU needed)
 just ci      # what CI runs
 ```
 
+## Editor integration (LSP)
+
+`softmaxlint lsp server` speaks the Language Server Protocol over stdio, so
+any editor with an LSP client works. It lints a file on open and on save
+(linting on every keystroke would queue slower than the server drains) and
+publishes the findings as diagnostics. Neovim:
+
+```lua
+vim.api.nvim_create_autocmd('FileType', {
+  pattern = 'python',
+  callback = function()
+    vim.lsp.start({
+      name = 'softmaxlint',
+      cmd = { 'softmaxlint', 'lsp', 'server' },
+      root_dir = vim.fs.root(0, { '.git' }),
+    })
+  end,
+})
+```
+
+Without a running LSP client, `softmaxlint lsp check <path>` runs the same
+scoring and grading as `check` but prints machine-readable output: LSP
+diagnostics JSON by default, or one ruff-style line per finding with
+`--output-format concise` (also `OUTPUT_FORMAT`).
+
 Live runs need the server above; scoring a file takes a few dozen server
 round-trips, so large trees take a while. `scripts/calibrate.py` reports false-positive rate, recall, and
 censoring rate over `corpus/`; run it before trusting a change to scoring or

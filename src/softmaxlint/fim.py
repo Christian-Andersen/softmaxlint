@@ -250,6 +250,8 @@ def parse_choice(choice: dict[str, Any], slice_: Slice) -> TokenAnalysis:
     if match is None:
         return {
             "token": slice_.text,
+            "start": slice_.start,
+            "end": slice_.end,
             "actual_prob": 0.0,
             "top_prob": top_prob,
             "top_token": top_token,
@@ -266,6 +268,8 @@ def parse_choice(choice: dict[str, Any], slice_: Slice) -> TokenAnalysis:
 
     return {
         "token": slice_.text,
+        "start": slice_.start,
+        "end": slice_.end,
         "actual_prob": actual_prob,
         "top_prob": top_prob,
         "top_token": top_token,

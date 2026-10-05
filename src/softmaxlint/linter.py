@@ -29,6 +29,10 @@ class TokenAnalysis(TypedDict):
     """Per-slice comparison of what was written against what was expected."""
 
     token: str
+    start: int
+    """Character offset where the slice begins; the LSP layer maps it to a range."""
+    end: int
+    """Character offset where the slice ends."""
     actual_prob: float
     top_prob: float
     top_token: str
@@ -281,6 +285,8 @@ class SoftmaxLinter:
                     # Unscored by policy (a string, comment, or whitespace): recorded
                     # as trivially expected so reporting still reassembles the file.
                     "token": slice_.text,
+                    "start": slice_.start,
+                    "end": slice_.end,
                     "actual_prob": 1.0,
                     "top_prob": 1.0,
                     "top_token": slice_.text,

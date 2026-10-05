@@ -107,6 +107,8 @@ def token_analysis(token: str = "<=", *, ratio: float = 0.021) -> TokenAnalysis:
     """A single TokenAnalysis, for tests that only care about the level."""
     return {
         "token": token,
+        "start": 0,
+        "end": len(token),
         "actual_prob": 0.02,
         "top_prob": 0.95,
         "top_token": CORRECT_OPERATOR,
