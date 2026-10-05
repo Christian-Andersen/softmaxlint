@@ -1,21 +1,18 @@
 """The `check` command: argument handling, file selection, and exit codes."""
 
 import math
-from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 import httpx2
 import pytest
 from typer.testing import CliRunner
 
 from softmaxlint import cli
-from softmaxlint.linter import SoftmaxLinter
 from softmaxlint.settings import Settings
 from tests.conftest import (
     BUGGY_OPERATOR,
     BUGGY_SNIPPET,
-    StubServer,
+    Serve,
     fim_responder,
     fixed_candidates,
 )
@@ -24,8 +21,6 @@ runner = CliRunner()
 
 CLEAN = fim_responder()
 DIRTY = fim_responder(surprising=BUGGY_OPERATOR)
-
-Serve = Callable[..., None]
 
 
 def write(path: Path, content: str) -> Path:
@@ -38,28 +33,6 @@ def write(path: Path, content: str) -> Path:
 def _isolate_settings(monkeypatch: pytest.MonkeyPatch, settings: Settings) -> None:
     """Stop the CLI from reading a developer's .env out of the working directory."""
     monkeypatch.setattr(cli, "Settings", lambda: settings)
-
-
-@pytest.fixture
-def serve(monkeypatch: pytest.MonkeyPatch) -> Serve:
-    """Point the CLI at a stub vLLM endpoint."""
-
-    def _serve(
-        responder: Callable[[str | list[str]], dict[str, Any]] | None = None,
-        *,
-        error: Exception | None = None,
-        models: list[str] | None = None,
-    ) -> None:
-        stub = StubServer(responder=responder, error=error, models=models)
-
-        class _StubbedLinter(SoftmaxLinter):
-            def __init__(self, config: Settings | None = None) -> None:
-                super().__init__(config)
-                self.client = stub.client()
-
-        monkeypatch.setattr(cli, "SoftmaxLinter", _StubbedLinter)
-
-    return _serve
 
 
 # ------------------------------------------------------------------------------

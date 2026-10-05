@@ -22,7 +22,7 @@ import pytest
 from openai import OpenAI
 from rich.console import Console
 
-from softmaxlint import fim
+from softmaxlint import cli, fim
 from softmaxlint.linter import SoftmaxLinter, TokenAnalysis
 from softmaxlint.settings import Settings
 
@@ -381,3 +381,32 @@ def make_linter(settings: Settings, server: StubServer) -> Callable[..., Softmax
         return linter
 
     return _make
+
+
+Serve = Callable[..., None]
+
+
+@pytest.fixture
+def serve(monkeypatch: pytest.MonkeyPatch, settings: Settings, server: StubServer) -> Serve:
+    """Point the CLI at a stub vLLM endpoint, ignoring ``.env`` while at it."""
+
+    def _serve(
+        responder: Callable[[str | list[str]], dict[str, Any]] | None = None,
+        *,
+        error: Exception | None = None,
+        models: list[str] | None = None,
+    ) -> None:
+        server.responder = responder
+        server.error = error
+        if models is not None:
+            server.models = models
+        monkeypatch.setattr(cli, "Settings", lambda: settings)
+
+        class _StubbedLinter(SoftmaxLinter):
+            def __init__(self, config: Settings | None = None) -> None:
+                super().__init__(config)
+                self.client = server.client()
+
+        monkeypatch.setattr(cli, "SoftmaxLinter", _StubbedLinter)
+
+    return _serve

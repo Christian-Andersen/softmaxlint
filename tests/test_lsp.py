@@ -17,6 +17,7 @@ from tests.conftest import (
     BUG_DIR,
     BUGGY_OPERATOR,
     BUGGY_SNIPPET,
+    Serve,
     StubServer,
     fim_responder,
 )
@@ -24,25 +25,6 @@ from tests.conftest import (
 runner = CliRunner()
 
 MakeLinter = Callable[..., SoftmaxLinter]
-Serve = Callable[..., None]
-
-
-@pytest.fixture
-def serve(monkeypatch: pytest.MonkeyPatch, settings: Settings, server: StubServer) -> Serve:
-    """Point the CLI at a stub vLLM endpoint, mirroring test_cli."""
-
-    def _serve(responder: Callable[[str | list[str]], dict[str, Any]] | None = None) -> None:
-        server.responder = responder
-
-        class _StubbedLinter(SoftmaxLinter):
-            def __init__(self, config: Settings | None = None) -> None:
-                super().__init__(config)
-                self.client = server.client()
-
-        monkeypatch.setattr(cli, "Settings", lambda: settings)
-        monkeypatch.setattr(cli, "SoftmaxLinter", _StubbedLinter)
-
-    return _serve
 
 
 def frame(payload: dict[str, Any]) -> bytes:
