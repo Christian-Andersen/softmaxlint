@@ -190,7 +190,9 @@ def test_check_reports_when_there_is_nothing_to_lint(tmp_path: Path) -> None:
     assert "no Python files to check" in result.output
 
 
-def test_check_skips_blank_files_without_asking_the_server(tmp_path: Path, serve: Serve) -> None:
+def test_check_skips_blank_files_without_asking_the_server(
+    tmp_path: Path, serve: Serve, server: StubServer
+) -> None:
     serve(CLEAN)
     write(tmp_path / "blank.py", "\n\n")
     write(tmp_path / "average.py", BUGGY_SNIPPET)
@@ -199,6 +201,8 @@ def test_check_skips_blank_files_without_asking_the_server(tmp_path: Path, serve
 
     assert result.exit_code == cli.EXIT_OK, result.output
     assert "1 file checked" in result.output
+    # One tokenization plus one scoring batch for average.py; blank.py sent nothing.
+    assert len(server.requests) == 2
 
 
 # ------------------------------------------------------------------------------
