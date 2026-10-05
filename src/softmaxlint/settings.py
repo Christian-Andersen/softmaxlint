@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     threshold_crit: float = 0.10
 
     # --- Fill-in-the-middle scoring -----------------------------------------
-    # The markers delimits the prefix, suffix and middle of a FIM prompt. The
+    # The markers delimit the prefix, suffix and middle of a FIM prompt. The
     # defaults are the Qwen spellings; StarCoder and CodeLlama differ, so
     # switching model family is a config change rather than a code change.
     fim_prefix_marker: str = "<|fim_prefix|>"
