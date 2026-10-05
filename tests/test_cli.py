@@ -93,7 +93,7 @@ def test_check_exits_two_when_the_served_model_is_ambiguous(tmp_path: Path, serv
     assert "alias-a" in result.output
 
 
-def test_check_names_the_discovered_model_in_its_output(tmp_path: Path, serve: Serve) -> None:
+def test_check_accepts_a_singly_advertised_model(tmp_path: Path, serve: Serve) -> None:
     serve(CLEAN, models=["served/model-x"])
     write(tmp_path / "average.py", BUGGY_SNIPPET)
 
