@@ -124,7 +124,9 @@ def collect_python_files(paths: Sequence[Path], *, respect_gitignore: bool = Tru
     to everything discovered by walking an explicitly named directory.
 
     Raises:
-        DiscoveryError: if a path does not exist or cannot be read.
+        DiscoveryError: if a path does not exist or is neither a regular
+            file nor a directory. An unreadable directory propagates its
+            OSError instead; only requested paths get DiscoveryError.
     """
     found: dict[Path, None] = {}
 
