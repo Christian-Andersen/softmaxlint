@@ -233,7 +233,7 @@ class SoftmaxLinter:
                 raise
             return fim.slice_source(source, "coarse")
 
-    def _should_score(self, source: str, slice_: Slice) -> bool:
+    def _should_score(self, slice_: Slice, prose: list[tuple[int, int]]) -> bool:
         """Whether ``slice_`` is worth a server round-trip.
 
         Whitespace is formatting, and (unless ``score_strings_and_comments``
@@ -245,7 +245,7 @@ class SoftmaxLinter:
             return False
         if self.config.score_strings_and_comments:
             return True
-        return not any(start <= slice_.start < end for start, end in _prose_spans(source))
+        return not any(start <= slice_.start < end for start, end in prose)
 
     def evaluate_snippet(self, code_text: str) -> list[TokenAnalysis]:
         """Score every token of ``code_text`` with bidirectional context.
@@ -266,7 +266,8 @@ class SoftmaxLinter:
             return []
 
         markers = self.markers
-        runnable = [index for index, slice_ in enumerate(slices) if self._should_score(code_text, slice_)]
+        prose = [] if self.config.score_strings_and_comments else _prose_spans(code_text)
+        runnable = [index for index, slice_ in enumerate(slices) if self._should_score(slice_, prose)]
         prompts = [fim.build_prompt(code_text, slices[index].start, markers) for index in runnable]
 
         scored: list[dict[str, Any]] = []
