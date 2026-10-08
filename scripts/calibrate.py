@@ -23,11 +23,12 @@ Usage::
 from __future__ import annotations
 
 import argparse
-import re
+import json
 import sys
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from rich.console import Console
 from rich.table import Table
@@ -44,8 +45,9 @@ BUGS = CORPUS / "bugs"
 #: Above this, most tokens are unknown to the server and the run is noise.
 CENSORING_ALARM = 0.10
 
-#: "# BUG: <explanation containing the expected token in quotes>"
-BUG_MARKER = re.compile(r"#\s*BUG:.*?[\"`]([^\"`]+)[\"`]", re.ASCII)
+#: Seeded bugs per file. Labels live beside the sources, never in them:
+#: anything in the file is scoring context, including a comment naming a fix.
+EXPECTED: dict[str, Any] = json.loads((BUGS / "expected.json").read_text(encoding="utf-8"))
 
 console = Console()
 
@@ -58,27 +60,26 @@ class FileReport:
     tokens: int = 0
     findings: Counter[str] = field(default_factory=Counter)
     censored: int = 0
-    expected: str = ""
-    hit_expected: bool = False
+    expected: list[dict[str, Any]] = field(default_factory=list)
+    hits: set[int] = field(default_factory=set)
 
     @property
     def flagged(self) -> int:
         return sum(self.findings.values())
 
 
-def expected_token(path: Path) -> str:
-    """The token a buggy file is supposed to get flagged on, from its BUG comment."""
-    for line in path.read_text(encoding="utf-8").splitlines():
-        match = BUG_MARKER.search(line)
-        if match:
-            return match.group(1)
-    return ""
+def line_of(source: str, offset: int) -> int:
+    """1-based line number of a character ``offset``."""
+    return source.count("\n", 0, offset) + 1
 
 
 def score(path: Path, linter: SoftmaxLinter) -> FileReport:
     """Score one file and grade every token in it."""
-    report = FileReport(path=path, expected=expected_token(path) if BUGS in path.parents else "")
-    results = linter.evaluate_snippet(path.read_text(encoding="utf-8"))
+    report = FileReport(path=path)
+    if BUGS in path.parents:
+        report.expected = list(EXPECTED.get(path.name, []))
+    source = path.read_text(encoding="utf-8")
+    results = linter.evaluate_snippet(source)
 
     for analysis in results:
         report.tokens += 1
@@ -87,10 +88,12 @@ def score(path: Path, linter: SoftmaxLinter) -> FileReport:
         level = linter.classify(analysis)
         if level is not None:
             report.findings[analysis["token"]] += 1
-            # The tokenizer folds preceding whitespace into the token
-            # (``' =='``), while a BUG marker names it bare (``"=="``).
-            if report.expected and analysis["token"].strip() == report.expected:
-                report.hit_expected = True
+            # BPE folds preceding whitespace into the token (``' =='``),
+            # so both sides compare stripped.
+            line = line_of(source, analysis["start"])
+            for index, bug in enumerate(report.expected):
+                if bug["line"] == line and analysis["token"].strip() == bug["token"]:
+                    report.hits.add(index)
 
     return report
 
@@ -99,17 +102,23 @@ def summarise(reports: list[FileReport], label: str) -> None:
     table = Table(title=f"{label}", title_style="bold cyan", header_style="bold magenta")
     for column in ("file", "tokens", "censored", "flagged", "top offender"):
         table.add_column(column)
-    table.add_column("expected hit", justify="center")
+    table.add_column("recall", justify="center")
 
     for report in sorted(reports, key=lambda item: (-item.flagged, item.path.name)):
         worst = report.findings.most_common(1)
+        if not report.expected:
+            recall = ""
+        elif len(report.hits) == len(report.expected):
+            recall = f"[green]{len(report.hits)}/{len(report.expected)}[/green]"
+        else:
+            recall = f"[red]{len(report.hits)}/{len(report.expected)}[/red]"
         table.add_row(
             report.path.name,
             str(report.tokens),
             f"[yellow]{report.censored}[/yellow]" if report.censored else "0",
             f"[red]{report.flagged}[/red]" if report.flagged else "0",
             repr(worst[0][0]) if worst else "-",
-            "" if not report.expected else ("[green]yes[/green]" if report.hit_expected else "[red]no[/red]"),
+            recall,
         )
     console.print(table)
 
@@ -158,7 +167,8 @@ def main() -> int:
     false_positives = sum(report.flagged for report in correct)
     censored = sum(report.censored for report in correct + bugs)
     scored = sum(report.tokens for report in correct + bugs)
-    hits = sum(1 for report in bugs if report.hit_expected)
+    hits = sum(len(report.hits) for report in bugs)
+    total_bugs = sum(len(report.expected) for report in bugs)
     dirty_files = sum(1 for report in bugs if report.flagged)
 
     console.print()
@@ -167,7 +177,7 @@ def main() -> int:
         f" ({100 * false_positives / max(clean_tokens, 1):.2f}%)"
     )
     console.print(f"[bold]files with any finding[/bold]  {sum(1 for r in correct if r.flagged)}/{len(correct)}")
-    console.print(f"[bold]recall[/bold]  {hits}/{len(bugs)} expected tokens flagged")
+    console.print(f"[bold]recall[/bold]  {hits}/{total_bugs} seeded bugs flagged")
     console.print(f"[bold]files with any finding[/bold]  {dirty_files}/{len(bugs)}")
     console.print(f"[bold]censoring rate[/bold]  {censored}/{scored} tokens ({100 * censored / max(scored, 1):.2f}%)")
 

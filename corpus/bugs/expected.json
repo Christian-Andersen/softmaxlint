@@ -1,0 +1,85 @@
+{
+  "boundaries.py": [
+    {
+      "line": 7,
+      "note": "the last index goes out of range",
+      "token": "<="
+    },
+    {
+      "line": 14,
+      "note": "walks one past the end",
+      "token": ">="
+    },
+    {
+      "line": 20,
+      "note": "count is exclusive, so the boundary is off by one",
+      "token": "<="
+    }
+  ],
+  "control_flow.py": [
+    {
+      "line": 6,
+      "note": "checks truthiness instead of calling the predicate",
+      "token": "item"
+    },
+    {
+      "line": 14,
+      "note": "unconditional, so the append is unreachable",
+      "token": "continue"
+    },
+    {
+      "line": 30,
+      "note": "max where min belongs",
+      "token": "max"
+    }
+  ],
+  "identity.py": [
+    {
+      "line": 8,
+      "note": "identity on ints instead of equality",
+      "token": "is"
+    },
+    {
+      "line": 12,
+      "note": "membership test written as identity",
+      "token": "is"
+    },
+    {
+      "line": 18,
+      "note": "identity against a stored default",
+      "token": "is"
+    },
+    {
+      "line": 24,
+      "note": "identity on strings; equal strings are usually different objects",
+      "token": "is"
+    }
+  ],
+  "operators.py": [
+    {
+      "line": 5,
+      "note": "equality on an empty list; identity is meant",
+      "token": "=="
+    },
+    {
+      "line": 9,
+      "note": "accepts only negatives; zero is not positive",
+      "token": "<"
+    },
+    {
+      "line": 13,
+      "note": "subtracts where addition is meant",
+      "token": "-"
+    },
+    {
+      "line": 17,
+      "note": "adds where multiplication is meant",
+      "token": "+"
+    },
+    {
+      "line": 21,
+      "note": "exact fits mislabelled",
+      "token": ">="
+    }
+  ]
+}

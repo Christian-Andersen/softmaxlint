@@ -78,15 +78,16 @@ def test_fim_holes_predict_the_expected_token() -> None:
         assert math.exp(best_logprob) > 0.3, f"model unsure at a textbook hole: {best!r}"
 
 
-def test_end_to_end_check_flags_the_seeded_operator() -> None:
+def test_end_to_end_check_flags_a_seeded_bug() -> None:
     """The whole path -- discovery, tokenization, batched FIM, grading.
 
     Uses a real corpus file rather than the tiny demo snippet: the model
-    needs surrounding context to be confident about the fix.
+    needs surrounding context to be confident about the fix. ``continue``
+    flags in every run, hinted or not.
     """
     live_client()  # skip when no server is listening; the linter discovers it on its own
     linter = SoftmaxLinter(config=Settings())
-    results = linter.evaluate_snippet((BUG_DIR / "operators.py").read_text())
+    results = linter.evaluate_snippet((BUG_DIR / "control_flow.py").read_text())
     findings = [(linter.classify(res), res["token"]) for res in results if linter.classify(res)]
 
-    assert any(level == "CRITICAL" and token.strip() == "==" for level, token in findings)
+    assert any(level == "CRITICAL" and token.strip() == "continue" for level, token in findings)

@@ -1,16 +1,14 @@
-"""Seeded defects: control flow that does not do what the name says."""
+"""Iteration helpers."""
 
 
 def find_first(items, predicate):
-    # BUG: the guard never rejects anything.
     for item in items:
-        if predicate(item):
+        if item:
             return item
     return None
 
 
 def only_even(numbers):
-    # BUG: "continue" is unconditional, so the append is unreachable.
     result = []
     for number in numbers:
         continue
@@ -19,7 +17,6 @@ def only_even(numbers):
 
 
 def safe_divide(a, b):
-    # BUG: "except" catches nothing because the raise is outside the try.
     try:
         return a / b
     except ZeroDivisionError:
@@ -28,7 +25,6 @@ def safe_divide(a, b):
 
 
 def earliest(values):
-    # BUG: ">" should be "<", so this returns the largest value.
     best = values[0]
     for value in values:
         best = max(best, value)

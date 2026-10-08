@@ -6,17 +6,18 @@ competent model -- it echoes its tokenization and always ranks the token that
 was actually written first -- and assert the linter stays silent. That is the
 property a real run depends on, and it is what a misaligned probe destroys.
 
-``corpus/bugs`` holds seeded defects whose expected token is named in a
-``# BUG:`` comment, so recall is measured rather than eyeballed.
+``corpus/bugs`` holds seeded defects listed in ``expected.json`` beside them,
+so recall is measured rather than eyeballed. The labels stay out of the
+sources because anything in the file -- including a comment naming the fix
+-- is scoring context to the model.
 """
 
-import re
 from pathlib import Path
 
 import pytest
 
 from softmaxlint.linter import SoftmaxLinter
-from tests.conftest import BUG_DIR, CORRECT_DIR, FimStub, expected_bug_token
+from tests.conftest import BUG_DIR, CORRECT_DIR, EXPECTED_LABELS, FimStub, expected_bugs, line_of
 
 CORRECT_FILES = sorted(CORRECT_DIR.glob("*.py"))
 BUG_FILES = sorted(BUG_DIR.glob("*.py"))
@@ -26,6 +27,20 @@ def flagged(linter: SoftmaxLinter, path: Path) -> list[tuple[str, str]]:
     """Every graded token in ``path``, as (level, token)."""
     results = linter.evaluate_snippet(path.read_text(encoding="utf-8"))
     return [(level, analysis["token"]) for analysis in results if (level := linter.classify(analysis))]
+
+
+def bug_hits(linter: SoftmaxLinter, path: Path) -> set[int]:
+    """Indices into the file's sidecar entries that graded as findings."""
+    source = path.read_text(encoding="utf-8")
+    hits = set()
+    for res in linter.evaluate_snippet(source):
+        if linter.classify(res) is None:
+            continue
+        line = line_of(source, res["start"])
+        for index, bug in enumerate(expected_bugs(path.name)):
+            if bug["line"] == line and res["token"].strip() == bug["token"]:
+                hits.add(index)
+    return hits
 
 
 # ------------------------------------------------------------------------------
@@ -42,6 +57,7 @@ def test_the_corpus_is_actually_present() -> None:
     """Guards against a corpus that quietly went missing."""
     assert len(CORRECT_FILES) >= 3
     assert len(BUG_FILES) >= 3
+    assert sum(len(expected_bugs(path.name)) for path in BUG_FILES) >= 10
 
 
 def test_censoring_does_not_leak_into_good_code(make_linter) -> None:  # noqa: ANN001
@@ -72,13 +88,19 @@ def test_misaligned_probes_flood_the_report(make_linter) -> None:  # noqa: ANN00
 # Recall on seeded defects
 # ------------------------------------------------------------------------------
 @pytest.mark.parametrize("path", BUG_FILES, ids=lambda p: p.name)
-def test_a_seeded_defect_is_flagged_on_its_marked_token(make_linter, path: Path) -> None:  # noqa: ANN001
-    expected = expected_bug_token(path)
-    assert expected, f"{path.name} has no # BUG: marker"
+def test_seeded_bugs_are_flaggable_on_their_marked_lines(make_linter, path: Path) -> None:  # noqa: ANN001
+    """The pipeline grades a disbelieved token on its own line.
 
-    linter = make_linter(responder=FimStub(surprising=expected, alternative="zzz"))
+    The stub plays a model that disbelieves each seeded token in turn, so this
+    tests scoring, grading, and label matching -- not any real model's priors.
+    """
+    bugs = expected_bugs(path.name)
+    assert bugs, f"{path.name} has no sidecar entries"
 
-    assert any(level == "CRITICAL" and token.strip() == expected for level, token in flagged(linter, path))
+    for index, bug in enumerate(bugs):
+        linter = make_linter(responder=FimStub(surprising=str(bug["token"]), alternative="zzz"))
+
+        assert index in bug_hits(linter, path), f"{path.name}:{bug['line']} {bug['token']!r} not flagged"
 
 
 @pytest.mark.parametrize("path", BUG_FILES, ids=lambda p: p.name)
@@ -94,13 +116,20 @@ def test_every_corpus_file_is_valid_python(path: Path) -> None:
     compile(path.read_text(encoding="utf-8"), str(path), "exec")
 
 
-def test_bug_markers_name_tokens_that_occur_in_the_file() -> None:
-    """A stale marker would silently measure recall against the wrong token."""
+def test_every_bug_file_has_sidecar_labels() -> None:
+    assert set(EXPECTED_LABELS) == {path.name for path in BUG_FILES}
+
+
+def test_labels_point_at_their_tokens() -> None:
+    """A label names a token written on its own line, with a note for readers."""
     for path in BUG_FILES:
-        token = expected_bug_token(path)
-        assert token in path.read_text(encoding="utf-8"), f"{path.name}: {token!r} not in file"
+        lines = path.read_text(encoding="utf-8").splitlines()
+        for bug in expected_bugs(path.name):
+            assert 1 <= bug["line"] <= len(lines), f"{path.name}: line {bug['line']} out of range"
+            assert bug["token"] in lines[bug["line"] - 1], f"{path.name}:{bug['line']} has no {bug['token']!r}"
+            assert bug["note"], f"{path.name}:{bug['line']} needs a note"
 
 
-def test_no_bug_marker_sits_in_the_good_corpus() -> None:
-    for path in CORRECT_FILES:
-        assert not re.search(r"#\s*BUG:", path.read_text(encoding="utf-8"))
+def test_no_bug_markers_remain_in_the_corpus() -> None:
+    for path in CORRECT_FILES + BUG_FILES:
+        assert "# BUG:" not in path.read_text(encoding="utf-8"), path.name

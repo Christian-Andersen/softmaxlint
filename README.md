@@ -8,33 +8,35 @@ error.
 
 ## Example
 
-`operators.py:1-6`:
+`control_flow.py:1-16`:
 
 ```python
-"""Seeded defects: wrong operators and wrong operands."""
+"""Iteration helpers."""
 
 
-def is_empty(items):
-    # BUG: "==" only matches by value; identity is what was written.
-    return items == []
-```
+def find_first(items, predicate):
+    for item in items:
+        if item:
+            return item
+    return None
 
-`operators.py:14-16`:
 
-```python
-def grow(items):
-    # BUG: "-" subtracts where "+" is meant.
-    return items - 1
+def only_even(numbers):
+    result = []
+    for number in numbers:
+        continue
+        result.append(number)
+    return result
 ```
 
 ```sh
-$ softmaxlint lsp check --output-format concise operators.py
-operators.py:6:17: [CRITICAL] Wrote ' ==' (0.10%) but the model expected ' is' (94.65%)
-operators.py:16:17: [CRITICAL] Wrote ' -' (0.24%) but the model expected ' +' (67.36%)
+$ softmaxlint lsp check --output-format concise control_flow.py
+control_flow.py:6:11: [CRITICAL] Wrote ' item' (0.01%) but the model expected ' predicate' (96.73%)
+control_flow.py:14:8: [CRITICAL] Wrote ' continue' (0.01%) but the model expected ' if' (99.11%)
 ```
 
-No rule names `==`-on-empty-list. The model read the function, decided the
-token was wrong at 0.10%, and named the fix at 94.65%.
+No rule names "unconditional `continue`". The model read the loop, decided
+the token was wrong at 0.01%, and named the fix at 99.11%.
 
 ## How it works
 
@@ -50,12 +52,19 @@ token was wrong at 0.10%, and named the fix at 94.65%.
 ## Calibration
 
 `scripts/calibrate.py` scores a labelled corpus (`corpus/correct` should stay
-silent, `corpus/bugs` carries seeded defects). Against Qwen2.5-Coder-7B:
+silent; `corpus/bugs` lists its seeded defects in `expected.json` beside
+them, never in the sources where the model could read them). Against
+Qwen2.5-Coder-7B:
 
-- False positives: ~1.2% of tokens on known-good code
-- Recall: 3/4 seeded bug types, with all 4 buggy files flagged
-- The miss is off-by-one boundaries (`<=` vs `<`), where the model is
-  genuinely unsure — surprisal cannot see what needs execution to decide
+- False positives: ~1.2% of tokens on known-good code (10/820)
+- Recall: 8/15 seeded bugs, with all 4 buggy files flagged
+- The misses cluster where the model is unsure or agrees: boundary `<=`
+  with a flat distribution, `==` with no hinting comment nearby, `is`
+  against a default and `>=` on exact fits that the model accepts
+
+Labels stay out of model context on purpose: an earlier corpus named the
+fix in a comment next to the bug, and recall measured that setup instead
+of the tool.
 
 ## Serving a model
 

@@ -52,16 +52,22 @@ SERVED_MODEL = "stub-served-model"
 CORRECT_DIR = Path(__file__).resolve().parent.parent / "corpus" / "correct"
 BUG_DIR = Path(__file__).resolve().parent.parent / "corpus" / "bugs"
 
-#: "# BUG: <prose naming the expected token in quotes>"
-BUG_MARKER = re.compile(r"#\s*BUG:.*?[\"`]([^\"`]+)[\"`]", re.ASCII)
+EXPECTED_LABELS: dict[str, Any] = json.loads((BUG_DIR / "expected.json").read_text(encoding="utf-8"))
+"""Seeded bugs per file: ``{filename: [{line, token, note}]}``.
+
+Labels live outside the corpus sources on purpose: anything in the file is
+scoring context to the model, including a comment that names the fix.
+"""
 
 
-def expected_bug_token(path: Path) -> str:
-    """The token a corpus bug file is supposed to get flagged on."""
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if match := BUG_MARKER.search(line):
-            return match.group(1)
-    return ""
+def expected_bugs(filename: str) -> list[dict[str, Any]]:
+    """The seeded bugs a file is supposed to get flagged on."""
+    return list(EXPECTED_LABELS.get(filename, []))
+
+
+def line_of(source: str, offset: int) -> int:
+    """1-based line number of a character ``offset``."""
+    return source.count("\n", 0, offset) + 1
 
 
 DEFAULT_MARKERS = fim.FimMarkers(

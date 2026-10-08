@@ -1,25 +1,24 @@
-"""Seeded defects: identity where equality was meant, and vice versa."""
+"""Mapping and comparison helpers."""
+
+DEFAULT_NAME = "unknown"
 
 
 def contains_big(values):
-    # BUG: "is" compares identity; CPython interns small ints so this passes by luck.
-    return 1000 in [v for v in values if v == 1000]
+    big = 1000
+    return any(v is big for v in values)
 
 
 def missing_key(mapping, key):
-    # BUG: "is" compares identity, so a present key still reads as missing.
-    if key is not None:
-        return mapping[key]
-    return None
+    if key is mapping:
+        return None
+    return mapping[key]
 
 
 def default_is_missing(mapping):
-    # BUG: "is" makes a stored None indistinguishable from an absent key.
-    if mapping.get("name") is None:
+    if mapping.get("name") is DEFAULT_NAME:
         return True
     return False
 
 
 def same_text(left, right):
-    # BUG: "is" on strings; two equal strings are usually different objects.
     return left is right
