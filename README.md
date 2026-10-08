@@ -15,29 +15,15 @@ error.
 def is_empty(items):
     # BUG: "==" only matches by value; identity is what was written.
     return items == []
-
-
-def all_positive(numbers):
-    # BUG: "<" should be ">="; zero is not positive but this accepts it.
-    return all(number < 0 for number in numbers)
-
-
-def grow(items):
-    # BUG: "-" subtracts where "+" is meant.
-    return items - 1
 ```
 
 ```sh
 $ softmaxlint lsp check --output-format concise operators.py
 operators.py:6:17: [CRITICAL] Wrote ' ==' (0.10%) but the model expected ' is' (94.65%)
-operators.py:16:17: [CRITICAL] Wrote ' -' (0.24%) but the model expected ' +' (67.36%)
 ```
 
 No rule names `==`-on-empty-list. The model read the function, decided the
-token was wrong at 0.10%, and named the fix at 94.65%. The middle function
-is not flagged: whether zero counts as positive lives in the function's
-spec, which the model can't see. Surprisal catches wrong tokens, not wrong
-requirements — the Calibration numbers below say the same.
+token was wrong at 0.10%, and named the fix at 94.65%.
 
 ## How it works
 
