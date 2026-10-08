@@ -219,7 +219,7 @@ def lsp_check(
 
     if settings.output_format == "concise":
         for file, item in findings:
-            print(lsp_support.format_concise(str(display_path(file)), item))
+            print(lsp_support.format_concise(display_path(file), item))
     else:
         print(json.dumps([item for _, item in findings], indent=2))
 

@@ -94,7 +94,7 @@ def file_uri(path: Path) -> str:
     return path.resolve().as_uri()
 
 
-def format_concise(path: str, diagnostic: dict[str, Any]) -> str:
+def format_concise(path: Path, diagnostic: dict[str, Any]) -> str:
     """One ``path:line:col: [CODE] message`` line, ruff-concise style.
 
     Lines and columns are 1-based for display; the diagnostic range stays
