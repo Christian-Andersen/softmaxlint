@@ -34,7 +34,10 @@ operators.py:16:17: [CRITICAL] Wrote ' -' (0.24%) but the model expected ' +' (6
 ```
 
 No rule names `==`-on-empty-list. The model read the function, decided the
-token was wrong at 0.10%, and named the fix at 94.65%.
+token was wrong at 0.10%, and named the fix at 94.65%. The middle function
+is not flagged: whether zero counts as positive lives in the function's
+spec, which the model can't see. Surprisal catches wrong tokens, not wrong
+requirements — the Calibration numbers below say the same.
 
 ## How it works
 
