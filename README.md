@@ -8,6 +8,8 @@ error.
 
 ## Example
 
+`operators.py:1-6`:
+
 ```python
 """Seeded defects: wrong operators and wrong operands."""
 
@@ -17,9 +19,18 @@ def is_empty(items):
     return items == []
 ```
 
+`operators.py:14-16`:
+
+```python
+def grow(items):
+    # BUG: "-" subtracts where "+" is meant.
+    return items - 1
+```
+
 ```sh
 $ softmaxlint lsp check --output-format concise operators.py
 operators.py:6:17: [CRITICAL] Wrote ' ==' (0.10%) but the model expected ' is' (94.65%)
+operators.py:16:17: [CRITICAL] Wrote ' -' (0.24%) but the model expected ' +' (67.36%)
 ```
 
 No rule names `==`-on-empty-list. The model read the function, decided the
